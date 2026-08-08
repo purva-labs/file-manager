@@ -1,0 +1,11 @@
+services:
+  filemanager:
+    build: .
+    container_name: filemanager
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3088:3088"
+    environment:
+      FILEMANAGER_ROOT: /data
+    volumes:
+      - ${FILEMANAGER_ROOT:-./data}:/data:rw
