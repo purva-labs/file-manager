@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>File Manager</title>
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="dot"></div>
+          <div>
+            <h1>File Manager</h1>
+            <p id="rootPath">Loading root...</p>
+          </div>
+        </div>
+        <section class="storage-card" aria-live="polite">
+          <p class="storage-label">Storage</p>
+          <p id="storageSummary" class="storage-summary">Loading disk usage...</p>
+          <div class="storage-meter" role="progressbar" aria-label="Disk usage">
+            <span id="storageBarUsed" class="storage-used" style="width: 0%"></span>
+            <span id="storageBarFree" class="storage-free" style="width: 100%"></span>
+          </div>
+          <p id="storageMeta" class="storage-meta">-</p>
+        </section>
+      </aside>
+
+      <main class="content">
+        <header class="toolbar">
+          <button id="backButton" class="icon-btn" type="button" aria-label="Back">
+            <span class="btn-icon" aria-hidden="true">&#x2190;</span>
+            <span>Back</span>
+          </button>
+          <div id="breadcrumbs" class="breadcrumbs"></div>
+          <label class="search-box" for="searchInput">
+            <span aria-hidden="true">&#x2315;</span>
+            <input id="searchInput" type="search" placeholder="Search this folder" autocomplete="off" spellcheck="false" />
+          </label>
+          <button id="uploadButton" type="button" aria-label="Upload files">
+            <span aria-hidden="true">&#x2B06;</span>
+            <span>Upload</span>
+          </button>
+          <button id="newFolderButton" type="button">New folder</button>
+          <button id="refreshButton" type="button">Refresh</button>
+        </header>
+
+        <section class="workspace">
+          <div id="selectionActions" class="selection-actions" aria-hidden="true">
+            <div id="selectionCount" class="selection-count">0 selected</div>
+            <div class="selection-buttons">
+              <button id="topCopyButton" type="button" aria-label="Copy selected items">
+                <span aria-hidden="true">&#x2398;</span>
+                <span>Copy</span>
+              </button>
+              <button id="topRenameButton" type="button" aria-label="Rename selected item">
+                <span aria-hidden="true">&#x270E;</span>
+                <span>Rename</span>
+              </button>
+              <button id="topPasteButton" type="button" aria-label="Paste copied items">
+                <span aria-hidden="true">&#x2399;</span>
+                <span>Paste</span>
+              </button>
+              <button id="topDownloadButton" type="button" aria-label="Download selected items">
+                <span aria-hidden="true">&#x2B07;</span>
+                <span>Download</span>
+              </button>
+              <button id="topDeleteButton" class="danger" type="button" aria-label="Delete selected items">
+                <span aria-hidden="true">&#x1F5D1;</span>
+                <span>Delete</span>
+              </button>
+            </div>
+          </div>
+          <div id="dropZone" class="table-wrap">
+            <div class="drop-hint" aria-hidden="true">Drop files here to upload</div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Size</th>
+                  <th>Modified</th>
+                </tr>
+              </thead>
+              <tbody id="entriesTableBody"></tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div id="contextMenu" class="context-menu" role="menu" aria-hidden="true">
+      <button id="contextUploadButton" type="button" role="menuitem">Upload</button>
+      <button id="contextCopyButton" type="button" role="menuitem">Copy</button>
+      <button id="contextRenameButton" type="button" role="menuitem">Rename</button>
+      <button id="contextPasteButton" type="button" role="menuitem">Paste</button>
+      <button id="contextDownloadButton" type="button" role="menuitem">Download</button>
+      <button id="contextDeleteButton" class="danger" type="button" role="menuitem">Delete</button>
+    </div>
+
+    <input id="uploadInput" type="file" multiple hidden />
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script src="app.js"></script>
+  </body>
+</html>
