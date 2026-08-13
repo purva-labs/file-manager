@@ -11,6 +11,7 @@ process.env.FILEMANAGER_ROOT = root;
 
 const {
   getStorageDeviceSource,
+  mapWithConcurrency,
   parseMountInfo,
   resolveSafeChildPath,
   resolveSafePath,
@@ -18,6 +19,23 @@ const {
   summarizeLocalDevices,
   validateEntryName,
 } = require('../src/server');
+
+test('bounds concurrent work while preserving result order', async () => {
+  let active = 0;
+  let peak = 0;
+  const values = Array.from({ length: 30 }, (_, index) => index);
+  const results = await mapWithConcurrency(values, 5, async (value) => {
+    active += 1;
+    peak = Math.max(peak, active);
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    active -= 1;
+    return value * 2;
+  });
+
+  assert.deepEqual(results, values.map((value) => value * 2));
+  assert.ok(peak <= 5);
+  assert.ok(peak > 1);
+});
 
 test.after(() => {
   fs.rmSync(root, { recursive: true, force: true });

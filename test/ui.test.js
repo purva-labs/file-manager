@@ -27,6 +27,11 @@ test('renders the functional browser controls in the redesigned shell', () => {
     'storageDevicesList',
     'filesystemsList',
     'detailsDrawer',
+    'addNodeButton',
+    'addNodeModal',
+    'installCommand',
+    'previousPageButton',
+    'nextPageButton',
   ]) {
     assert.match(html, new RegExp(`id="${id}"`));
   }
@@ -34,4 +39,9 @@ test('renders the functional browser controls in the redesigned shell', () => {
   for (const sortKey of ['name', 'type', 'size', 'modifiedAt']) {
     assert.match(html, new RegExp(`data-sort-key="${sortKey}"`));
   }
+});
+
+test('does not trigger recursive directory sizing when a row is selected', () => {
+  assert.doesNotMatch(appScript, /revealSize\(/);
+  assert.doesNotMatch(appScript, /getEntrySize\(/);
 });

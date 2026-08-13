@@ -52,6 +52,7 @@
               <span id="nodeCount" class="section-meta"></span>
             </div>
             <div id="nodeButtons" class="node-buttons"></div>
+            <button id="addNodeButton" class="add-node-button" type="button"><span aria-hidden="true">＋</span>Add node</button>
             <p id="nodeStatus" class="node-status" aria-live="polite">Select a node</p>
           </section>
         </aside>
@@ -107,9 +108,9 @@
                 <span id="footerSelectionCount">0 selected</span>
                 <div class="pagination" aria-label="Pagination">
                   <span id="paginationSummary">Showing 0 items</span>
-                  <button type="button" disabled aria-label="Previous page">‹</button>
-                  <button type="button" class="current-page" aria-current="page">1</button>
-                  <button type="button" disabled aria-label="Next page">›</button>
+                  <button id="previousPageButton" type="button" aria-label="Previous page">‹</button>
+                  <button id="currentPageButton" type="button" class="current-page" aria-current="page">1</button>
+                  <button id="nextPageButton" type="button" aria-label="Next page">›</button>
                 </div>
               </footer>
             </div>
@@ -176,6 +177,29 @@
       <button id="contextPasteButton" type="button" role="menuitem">Paste</button>
       <button id="contextDownloadButton" type="button" role="menuitem">Download</button>
       <button id="contextDeleteButton" class="danger" type="button" role="menuitem">Delete</button>
+    </div>
+
+    <div id="addNodeModal" class="modal-backdrop" hidden>
+      <section class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="addNodeTitle">
+        <header class="modal-header">
+          <div><p class="section-label">Agent enrollment</p><h2 id="addNodeTitle">Add a Linux node</h2></div>
+          <button id="closeAddNodeButton" class="square-button" type="button" aria-label="Close">×</button>
+        </header>
+        <div class="modal-body">
+          <label class="field-label" for="enrollmentNodeName">Node name</label>
+          <input id="enrollmentNodeName" class="text-field" type="text" maxlength="80" placeholder="Example: Media server" />
+          <label class="field-label" for="enrollmentHubUrl">Hub URL reachable from the node</label>
+          <input id="enrollmentHubUrl" class="text-field" type="url" placeholder="http://100.64.0.10:3090" />
+          <button id="generateInstallCommandButton" class="primary-action modal-primary" type="button">Generate install command</button>
+          <div id="installCommandPanel" class="install-command-panel" hidden>
+            <div class="command-heading"><span>Run once on the new node</span><span id="enrollmentExpiry"></span></div>
+            <textarea id="installCommand" rows="5" readonly spellcheck="false"></textarea>
+            <button id="copyInstallCommandButton" type="button">Copy command</button>
+            <p>The code is single-use. The permanent node credential is created and stored automatically.</p>
+          </div>
+          <p id="enrollmentMessage" class="enrollment-message" role="status" aria-live="polite"></p>
+        </div>
+      </section>
     </div>
 
     <input id="uploadInput" type="file" multiple hidden />

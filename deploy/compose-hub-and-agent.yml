@@ -9,9 +9,10 @@ services:
       PORT: ${HUB_PORT:-3090}
       FILEMANAGER_LISTEN_HOST: ${PRIVATE_IP:?Set PRIVATE_IP to this node's private-network address}
       FILEMANAGER_NODES_FILE: /run/file-manager/nodes.json
+      FILEMANAGER_SECRETS_DIR: /run/file-manager/secrets
     volumes:
-      - ${NODES_FILE:?Set NODES_FILE}:/run/file-manager/nodes.json:ro
-      - ${SECRETS_DIR:?Set SECRETS_DIR}:/run/file-manager/secrets:ro
+      - ${NODES_FILE:?Set NODES_FILE}:/run/file-manager/nodes.json:rw
+      - ${SECRETS_DIR:?Set SECRETS_DIR}:/run/file-manager/secrets:rw
 
   agent:
     build: ..

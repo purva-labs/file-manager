@@ -436,6 +436,19 @@ button.danger {
   clip: rect(0, 0, 0, 0);
 }
 
+.add-node-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: 100%;
+  margin-top: 9px;
+  border-style: dashed;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
 .content {
   display: flex;
   flex-direction: column;
@@ -1152,6 +1165,141 @@ th {
 
 .context-menu button.danger {
   background: transparent;
+}
+
+.modal-backdrop {
+  position: fixed;
+  z-index: 120;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(2, 8, 17, 0.72);
+  backdrop-filter: blur(8px);
+}
+
+.modal-backdrop[hidden] {
+  display: none;
+}
+
+.modal-dialog {
+  width: min(560px, 100%);
+  overflow: hidden;
+  border: 1px solid #304a69;
+  border-radius: 14px;
+  background: #0d1b2e;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.modal-header h2 {
+  margin: 5px 0 0;
+  font-size: 1.04rem;
+}
+
+.modal-body {
+  display: grid;
+  padding: 18px;
+}
+
+.field-label {
+  margin: 0 0 6px;
+  color: #b8c9dc;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.field-label:not(:first-child) {
+  margin-top: 13px;
+}
+
+.text-field,
+.install-command-panel textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #081526;
+  color: var(--text);
+}
+
+.text-field {
+  min-height: 40px;
+  padding: 0 11px;
+}
+
+.modal-primary {
+  justify-self: start;
+  margin-top: 16px;
+}
+
+.install-command-panel {
+  display: grid;
+  gap: 9px;
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(7, 17, 31, 0.72);
+}
+
+.install-command-panel[hidden] {
+  display: none;
+}
+
+.command-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: #c9d9eb;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.command-heading span:last-child {
+  color: var(--warning);
+  font-weight: 500;
+}
+
+.install-command-panel textarea {
+  resize: vertical;
+  min-height: 96px;
+  padding: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.68rem;
+  line-height: 1.5;
+}
+
+.install-command-panel button {
+  justify-self: start;
+}
+
+.install-command-panel p,
+.enrollment-message {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.66rem;
+  line-height: 1.5;
+}
+
+.enrollment-message {
+  min-height: 1.2em;
+  margin-top: 11px;
+}
+
+.enrollment-message.success {
+  color: var(--success);
+}
+
+.enrollment-message.error {
+  color: var(--danger);
 }
 
 @keyframes entry-open-tap {

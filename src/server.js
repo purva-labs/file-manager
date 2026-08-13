@@ -16,6 +16,7 @@ const DISPLAY_ROOT_PATH = path.resolve(process.env.FILEMANAGER_DISPLAY_ROOT || R
 const MAX_PREVIEW_BYTES = 2 * 1024 * 1024;
 const MAX_UPLOAD_FILE_BYTES = 512 * 1024 * 1024;
 const MAX_UPLOAD_FILES = 100;
+const DIRECTORY_STAT_CONCURRENCY = 48;
 const ROOT_REAL_PATH = fs.realpath(ROOT_PATH);
 const STORAGE_FILESYSTEM_TYPES = new Set([
   'btrfs', 'cifs', 'exfat', 'ext2', 'ext3', 'ext4', 'fuseblk',
@@ -563,6 +564,23 @@ function formatEntryType(entry, stats) {
   return stats.isDirectory() ? 'directory' : 'other';
 }
 
+async function mapWithConcurrency(items, concurrency, mapper) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await mapper(items[index], index);
+    }
+  }
+
+  const workerCount = Math.min(Math.max(1, concurrency), items.length);
+  await Promise.all(Array.from({ length: workerCount }, worker));
+  return results;
+}
+
 app.get('/api/config', (req, res) => {
   res.json({
     rootPath: DISPLAY_ROOT_PATH,
@@ -609,24 +627,24 @@ app.get('/api/list', async (req, res, next) => {
     }
 
     const dirents = await fs.readdir(safePath, { withFileTypes: true });
-    const entries = [];
-
-    for (const dirent of dirents) {
+    const listedEntries = await mapWithConcurrency(dirents, DIRECTORY_STAT_CONCURRENCY, async (dirent) => {
       const itemPath = path.join(safePath, dirent.name);
 
       try {
         const stats = await fs.lstat(itemPath);
-        entries.push({
+        return {
           name: dirent.name,
           path: await toDisplayPath(itemPath),
           type: formatEntryType(dirent, stats),
           size: stats.isFile() ? stats.size : null,
           modifiedAt: stats.mtime.toISOString(),
-        });
+        };
       } catch {
         // Ignore files that disappear while listing.
+        return null;
       }
-    }
+    });
+    const entries = listedEntries.filter(Boolean);
 
     entries.sort((a, b) => {
       if (a.type === 'directory' && b.type !== 'directory') return -1;
@@ -971,6 +989,7 @@ module.exports = {
   getStorageDeviceSource,
   isWithin,
   listStorageFilesystems,
+  mapWithConcurrency,
   parseMountInfo,
   resolveSafePath,
   summarizeLocalFilesystems,

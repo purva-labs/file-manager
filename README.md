@@ -7,7 +7,7 @@ The distributed design is platform-neutral: node names, addresses, storage layou
 ## Features
 
 - Browse, upload, preview, download, copy, rename, and delete files
-- Create folders, inspect directory sizes, and discover mounted filesystems
+- Create folders, view file sizes, and discover mounted filesystems
 - Select multiple nodes from one browser UI
 - Keep agent credentials on the hub; they are never sent to the browser
 - Stream uploads and downloads through the hub
@@ -20,7 +20,7 @@ The distributed design is platform-neutral: node names, addresses, storage layou
 | Goal | Deployment |
 |---|---|
 | Browse one safe directory | [Standalone mode](#standalone-mode) |
-| Browse several Docker hosts | [Distributed Docker deployment](#distributed-docker-deployment) |
+| Browse several nodes | [Distributed deployment](#distributed-deployment) |
 | Browse a Linux host without Docker | [Native systemd agent](#native-systemd-agent) |
 | Include Home Assistant OS storage | [Home Assistant app](#home-assistant-app) |
 
@@ -61,72 +61,47 @@ docker compose up -d --build
 
 Set `FILEMANAGER_ROOT` in `.env` to the host directory you want to expose. Open `http://127.0.0.1:3088` locally or place it behind an authenticated private reverse proxy.
 
-## Distributed Docker deployment
+## Distributed deployment
 
-The hub host runs the UI, hub, and its own agent. Every additional Docker node runs one agent.
+The lightweight deployment keeps only two components: one hub and one small agent per node. Node state remains in a JSON file with root-only credential files; no database, queue, or service discovery stack is required.
 
-### 1. Prepare the hub
-
-```bash
-sudo install -d -m 0700 /opt/file-manager/config /opt/file-manager/secrets
-sudo cp deploy/hub.env.example /opt/file-manager/hub.env
-sudo cp deploy/nodes.example.json /opt/file-manager/config/nodes.json
-sudo openssl rand -hex 32 | sudo tee /opt/file-manager/secrets/server-one.token >/dev/null
-sudo chmod 0600 /opt/file-manager/hub.env /opt/file-manager/config/nodes.json /opt/file-manager/secrets/*.token
-```
-
-Edit `/opt/file-manager/hub.env`:
-
-- `PRIVATE_IP`: the hub's address on the private network
-- `NODES_FILE` and `SECRETS_DIR`: the absolute paths created above
-- `AGENT_TOKEN_FILE`: the token for the hub host's own agent
-
-Edit `/opt/file-manager/config/nodes.json`. Every entry requires:
-
-- `id`: unique lowercase identifier using letters, digits, and hyphens
-- `name`: label shown in the UI
-- `url`: private agent URL
-- `tokenFile`: token path as mounted inside the hub container, normally `/run/file-manager/secrets/<id>.token`
-
-Start the hub and its agent:
+### 1. Start the hub
 
 ```bash
-docker compose --env-file /opt/file-manager/hub.env \
-  -f deploy/compose-hub-and-agent.yml up -d --build
+git clone https://github.com/purva-labs/file-manager.git
+cd file-manager
+mkdir -p file-manager-state
+PRIVATE_IP="$(tailscale ip -4)" docker compose -f deploy/compose-hub.yml up -d --build
 ```
 
-Open `http://<PRIVATE_IP>:3090` from an authorized private-network device.
+Open `http://<PRIVATE_IP>:3090` from an authorized private-network device. The hub creates its state files automatically.
 
-### 2. Prepare another Docker node
+### 2. Add each node
 
-Copy that node's token securely from the hub to the node, store it as `/etc/file-manager-agent/token`, and restrict it to root:
+1. Select **Add node** in the UI.
+2. Enter a name and confirm the private URL agents use to reach the hub.
+3. Select **Generate install command**.
+4. Run the displayed command once on the new Linux node.
+
+The command downloads the matching agent bundle directly from your hub, installs and starts the systemd service, then exchanges its single-use 15-minute enrollment code for a unique permanent credential. It does not depend on a separate release download. The permanent credential is never included in the command, and the node appears without editing JSON or restarting the hub.
+
+To add the hub machine itself, run its generated command on the hub host too.
+
+The automatic installer detects the node's Tailscale IPv4 address. On another private network, append a specific address:
 
 ```bash
-sudo install -d -m 0700 /etc/file-manager-agent
-sudo install -m 0600 /path/to/transferred-node-token /etc/file-manager-agent/token
-cp deploy/agent.env.example agent.env
+--listen-host 10.0.0.25
 ```
 
-Set `PRIVATE_IP` in `agent.env` to this node's private address, then run:
-
-```bash
-docker compose --env-file agent.env -f deploy/compose-agent.yml up -d --build
-```
-
-Add the node to the hub's `nodes.json`, copy the matching token into the hub's secrets directory, and recreate only the hub:
-
-```bash
-docker compose --env-file /opt/file-manager/hub.env \
-  -f deploy/compose-hub-and-agent.yml up -d --no-deps --force-recreate hub
-```
+The manual Compose files remain available for users who prefer immutable, externally managed node configuration.
 
 ## Native systemd agent
 
 Use this on Debian, Ubuntu, Raspberry Pi OS, or another systemd-based Linux node where Node.js 18+ is available.
 
+Normally, use the command generated by the hub. For a manual checkout-based installation:
+
 ```bash
-sudo apt-get update
-sudo apt-get install -y nodejs npm openssl tar
 sudo ./deploy/install-agent.sh --listen-host "$(tailscale ip -4)"
 ```
 
@@ -148,7 +123,7 @@ sudo ./deploy/install-agent.sh \
   --display-root /storage
 ```
 
-Securely copy `/etc/file-manager-agent/token` to the hub's secrets directory, add the node to `nodes.json`, and recreate the hub. Do not paste the token into a shell command, issue, or chat log.
+For automatic enrollment, the installer sends the permanent credential directly to the hub over the configured private network. Manual installations can still copy `/etc/file-manager-agent/token` into an externally managed hub configuration.
 
 Useful checks:
 
@@ -193,6 +168,8 @@ Home Assistant OS does not expose its immutable host root to apps. This package 
 | `PORT` | `3090` | Hub/UI port |
 | `FILEMANAGER_LISTEN_HOST` | `127.0.0.1` | Hub listener address |
 | `FILEMANAGER_NODES_FILE` | `/run/file-manager/nodes.json` | Private node configuration |
+| `FILEMANAGER_SECRETS_DIR` | `/run/file-manager/secrets` | Root-only per-node credentials |
+| `FILEMANAGER_ENROLLMENT_URL` | listener URL when private | Hub URL placed in generated commands |
 
 ## Updating and backup
 
@@ -202,8 +179,7 @@ For Docker deployments:
 
 ```bash
 git pull --ff-only
-docker compose --env-file /opt/file-manager/hub.env \
-  -f deploy/compose-hub-and-agent.yml up -d --build
+PRIVATE_IP="$(tailscale ip -4)" docker compose -f deploy/compose-hub.yml up -d --build
 ```
 
 For native agents, pull the new checkout and re-run `deploy/install-agent.sh` with the same arguments.

@@ -17,6 +17,8 @@ const state = {
   history: [],
   historyIndex: -1,
   nodeHealth: new Map(),
+  pageIndex: 0,
+  pageSize: 100,
 };
 
 const appBasePath = window.location.pathname.startsWith('/admin-proxy/filemanager')
@@ -47,6 +49,9 @@ const selectAllCheckboxEl = document.getElementById('selectAllCheckbox');
 const footerItemCountEl = document.getElementById('footerItemCount');
 const footerSelectionCountEl = document.getElementById('footerSelectionCount');
 const paginationSummaryEl = document.getElementById('paginationSummary');
+const previousPageButtonEl = document.getElementById('previousPageButton');
+const currentPageButtonEl = document.getElementById('currentPageButton');
+const nextPageButtonEl = document.getElementById('nextPageButton');
 const sortButtons = [...document.querySelectorAll('.sort-button')];
 const breadcrumbsEl = document.getElementById('breadcrumbs');
 const searchInputEl = document.getElementById('searchInput');
@@ -75,6 +80,18 @@ const detailsDrawerEl = document.getElementById('detailsDrawer');
 const drawerToggleEl = document.getElementById('drawerToggle');
 const drawerTabs = [...document.querySelectorAll('.drawer-tab')];
 const drawerPanels = [...document.querySelectorAll('.drawer-panel')];
+const addNodeButtonEl = document.getElementById('addNodeButton');
+const addNodeModalEl = document.getElementById('addNodeModal');
+const closeAddNodeButtonEl = document.getElementById('closeAddNodeButton');
+const enrollmentNodeNameEl = document.getElementById('enrollmentNodeName');
+const enrollmentHubUrlEl = document.getElementById('enrollmentHubUrl');
+const generateInstallCommandButtonEl = document.getElementById('generateInstallCommandButton');
+const installCommandPanelEl = document.getElementById('installCommandPanel');
+const installCommandEl = document.getElementById('installCommand');
+const copyInstallCommandButtonEl = document.getElementById('copyInstallCommandButton');
+const enrollmentExpiryEl = document.getElementById('enrollmentExpiry');
+const enrollmentMessageEl = document.getElementById('enrollmentMessage');
+let enrollmentPollTimer = null;
 
 function showToast(message, duration = 2200) {
   toastEl.textContent = message;
@@ -200,11 +217,88 @@ async function loadNodes() {
   }
   const data = await response.json();
   state.nodes = Array.isArray(data.nodes) ? data.nodes : [];
-  if (state.nodes.length === 0) throw new Error('The hub has no configured nodes.');
   nodesCardEl.hidden = false;
   quickInfoModeEl.textContent = 'Hub + agents';
   renderNodeButtons();
+  if (state.nodes.length === 0) setNodeStatus('Add your first node');
   return true;
+}
+
+function setEnrollmentMessage(message, status = '') {
+  enrollmentMessageEl.textContent = message;
+  enrollmentMessageEl.className = `enrollment-message ${status}`.trim();
+}
+
+function stopEnrollmentPolling() {
+  if (enrollmentPollTimer) window.clearInterval(enrollmentPollTimer);
+  enrollmentPollTimer = null;
+}
+
+async function openAddNodeModal() {
+  addNodeModalEl.hidden = false;
+  installCommandPanelEl.hidden = true;
+  installCommandEl.value = '';
+  setEnrollmentMessage('');
+  enrollmentNodeNameEl.value = '';
+  try {
+    const response = await fetch(appUrl('/api/enrollment-info'));
+    if (!response.ok) throw new Error('Enrollment is unavailable on this hub.');
+    const info = await response.json();
+    enrollmentHubUrlEl.value = info.hubUrl || window.location.origin;
+    enrollmentNodeNameEl.focus();
+  } catch (error) {
+    enrollmentHubUrlEl.value = window.location.origin;
+    setEnrollmentMessage(error.message, 'error');
+  }
+}
+
+function closeAddNodeModal() {
+  addNodeModalEl.hidden = true;
+  stopEnrollmentPolling();
+  addNodeButtonEl.focus();
+}
+
+async function generateInstallCommand() {
+  const name = enrollmentNodeNameEl.value.trim();
+  const hubUrl = enrollmentHubUrlEl.value.trim();
+  if (!name || !hubUrl) {
+    setEnrollmentMessage('Enter a node name and reachable hub URL.', 'error');
+    return;
+  }
+
+  generateInstallCommandButtonEl.disabled = true;
+  setEnrollmentMessage('Generating a single-use enrollment code...');
+  try {
+    const response = await fetch(appUrl('/api/enrollment-tokens'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, hubUrl }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `Unable to create enrollment code: ${response.status}`);
+    installCommandEl.value = data.command;
+    installCommandPanelEl.hidden = false;
+    enrollmentExpiryEl.textContent = `Expires ${new Date(data.expiresAt).toLocaleTimeString()}`;
+    setEnrollmentMessage('Run the command on the new node. This list will update when enrollment completes.');
+    const startingNodeIds = new Set(state.nodes.map((node) => node.id));
+    stopEnrollmentPolling();
+    enrollmentPollTimer = window.setInterval(async () => {
+      try {
+        await loadNodes();
+        const enrolledNode = state.nodes.find((node) => !startingNodeIds.has(node.id));
+        if (enrolledNode) {
+          stopEnrollmentPolling();
+          setEnrollmentMessage(`${enrolledNode.name} enrolled successfully.`, 'success');
+        }
+      } catch {
+        // The next poll retries while the hub or node is temporarily unavailable.
+      }
+    }, 3000);
+  } catch (error) {
+    setEnrollmentMessage(error.message, 'error');
+  } finally {
+    generateInstallCommandButtonEl.disabled = false;
+  }
 }
 
 async function selectNode(nodeId) {
@@ -541,16 +635,6 @@ function pushHistory(pathValue) {
   updateBackButton();
 }
 
-async function getEntrySize(pathValue) {
-  if (state.sizeCache.has(pathValue)) {
-    return state.sizeCache.get(pathValue);
-  }
-
-  const sizeInfo = await apiGet(`/api/size?path=${encodeURIComponent(pathValue)}`);
-  state.sizeCache.set(pathValue, sizeInfo.size);
-  return sizeInfo.size;
-}
-
 function getFilteredEntries() {
   const query = state.searchQuery.trim().toLowerCase();
   if (!query) {
@@ -561,23 +645,6 @@ function getFilteredEntries() {
     const haystack = `${entry.name} ${entry.type}`.toLowerCase();
     return haystack.includes(query);
   });
-}
-
-async function revealSize(entry, sizeCell) {
-  if (entry.type === 'file') {
-    sizeCell.textContent = formatBytes(entry.size);
-    return;
-  }
-
-  sizeCell.textContent = 'Calculating...';
-  try {
-    const dirSize = await getEntrySize(entry.path);
-    sizeCell.textContent = formatBytes(dirSize);
-    if (state.sortKey === 'size') renderCurrentView();
-  } catch (error) {
-    sizeCell.textContent = 'Unavailable';
-    showToast(error.message);
-  }
 }
 
 function openEntry(entry) {
@@ -641,7 +708,6 @@ function renderEntries(entries) {
       <td class="more-column"><button class="row-more-button" type="button" aria-label="More actions for ${safeName}">•••</button></td>
     `;
 
-    const sizeCell = row.querySelector('.size-cell');
     const rowCheckbox = row.querySelector('.row-checkbox');
     const moreButton = row.querySelector('.row-more-button');
 
@@ -660,7 +726,6 @@ function renderEntries(entries) {
     row.addEventListener('click', (event) => {
       hideContextMenu();
       selectFromClick(entry.path, event);
-      void revealSize(entry, sizeCell);
     });
 
     row.addEventListener('mousedown', (event) => {
@@ -690,17 +755,24 @@ function renderEntries(entries) {
 }
 
 function renderCurrentView() {
-  const visibleEntries = FileManagerSort.sortEntries(
+  const filteredEntries = FileManagerSort.sortEntries(
     getFilteredEntries(),
     state.sortKey,
     state.sortDirection,
     state.sizeCache
   );
-  renderEntries(visibleEntries);
-  footerItemCountEl.textContent = `${visibleEntries.length} item${visibleEntries.length === 1 ? '' : 's'}`;
-  paginationSummaryEl.textContent = visibleEntries.length === 0
+  const pageCount = Math.max(1, Math.ceil(filteredEntries.length / state.pageSize));
+  state.pageIndex = Math.min(state.pageIndex, pageCount - 1);
+  const pageStart = state.pageIndex * state.pageSize;
+  const pageEntries = filteredEntries.slice(pageStart, pageStart + state.pageSize);
+  renderEntries(pageEntries);
+  footerItemCountEl.textContent = `${filteredEntries.length} item${filteredEntries.length === 1 ? '' : 's'}`;
+  paginationSummaryEl.textContent = filteredEntries.length === 0
     ? 'Showing 0 items'
-    : `Showing 1–${visibleEntries.length} of ${visibleEntries.length}`;
+    : `Showing ${pageStart + 1}–${pageStart + pageEntries.length} of ${filteredEntries.length}`;
+  currentPageButtonEl.textContent = String(state.pageIndex + 1);
+  previousPageButtonEl.disabled = state.pageIndex === 0;
+  nextPageButtonEl.disabled = state.pageIndex >= pageCount - 1;
   updateSortHeaders();
 }
 
@@ -726,6 +798,7 @@ function setSort(sortKey) {
     state.sortKey = sortKey;
     state.sortDirection = 'asc';
   }
+  state.pageIndex = 0;
   clearSelection();
   renderCurrentView();
 }
@@ -764,6 +837,7 @@ async function loadDirectory(pathValue, options = {}) {
   renderBreadcrumb(data.path);
   clearSelection();
   state.entries = data.entries;
+  state.pageIndex = 0;
   renderCurrentView();
 
   if (recordHistory) {
@@ -985,6 +1059,7 @@ dropZoneEl.addEventListener('drop', (event) => {
 
 searchInputEl.addEventListener('input', () => {
   state.searchQuery = searchInputEl.value;
+  state.pageIndex = 0;
   clearSelection();
   renderCurrentView();
 });
@@ -992,6 +1067,19 @@ searchInputEl.addEventListener('input', () => {
 for (const button of sortButtons) {
   button.addEventListener('click', () => setSort(button.dataset.sortKey));
 }
+
+previousPageButtonEl.addEventListener('click', () => {
+  if (state.pageIndex === 0) return;
+  state.pageIndex -= 1;
+  clearSelection();
+  renderCurrentView();
+});
+
+nextPageButtonEl.addEventListener('click', () => {
+  state.pageIndex += 1;
+  clearSelection();
+  renderCurrentView();
+});
 
 selectAllCheckboxEl.addEventListener('change', () => {
   for (const entry of state.visibleEntries) {
@@ -1057,6 +1145,7 @@ document.addEventListener('keydown', (event) => {
   }
 
   if (event.key === 'Escape') {
+    if (!addNodeModalEl.hidden) closeAddNodeModal();
     hideContextMenu();
     return;
   }
@@ -1166,11 +1255,27 @@ drawerToggleEl.addEventListener('click', () => {
   drawerToggleEl.querySelector('span:first-child').textContent = collapsed ? 'Collapse' : 'Expand';
 });
 
+addNodeButtonEl.addEventListener('click', () => void openAddNodeModal());
+closeAddNodeButtonEl.addEventListener('click', closeAddNodeModal);
+addNodeModalEl.addEventListener('click', (event) => {
+  if (event.target === addNodeModalEl) closeAddNodeModal();
+});
+generateInstallCommandButtonEl.addEventListener('click', () => void generateInstallCommand());
+copyInstallCommandButtonEl.addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(installCommandEl.value);
+    setEnrollmentMessage('Install command copied.', 'success');
+  } catch {
+    installCommandEl.select();
+    setEnrollmentMessage('Select and copy the command manually.', 'error');
+  }
+});
+
 (async function initialize() {
   try {
     const distributed = await loadNodes();
     if (distributed) {
-      await selectNode(state.nodes[0].id);
+      if (state.nodes.length > 0) await selectNode(state.nodes[0].id);
       return;
     }
     quickInfoNodeEl.textContent = 'Local node';
