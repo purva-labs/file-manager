@@ -1,0 +1,14 @@
+services:
+  hub:
+    build: ..
+    container_name: file-manager-hub
+    command: ["node", "src/hub.js"]
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      PORT: ${HUB_PORT:-3090}
+      FILEMANAGER_LISTEN_HOST: ${PRIVATE_IP:?Set PRIVATE_IP to this node's private-network address}
+      FILEMANAGER_NODES_FILE: /var/lib/file-manager/nodes.json
+      FILEMANAGER_SECRETS_DIR: /var/lib/file-manager/secrets
+    volumes:
+      - ${STATE_DIR:-./file-manager-state}:/var/lib/file-manager:rw

@@ -1,50 +1,199 @@
 # File Manager
 
-A lightweight, self-hosted web file manager. Choose one host directory and the app exposes everything beneath it through a responsive browser interface.
+File Manager is a lightweight, self-hosted file browser. It can run against one directory on one machine, or as a distributed hub with an authenticated agent on each node.
+
+The distributed design is platform-neutral: node names, addresses, storage layouts, and credentials are configuration rather than application code. Linux hosts can use Docker or a native systemd agent. A Home Assistant app package is also included.
 
 ## Features
 
-- Browse every file and folder beneath the configured root
-- Upload, preview, download, copy, rename, and delete entries
-- Create folders and inspect directory sizes
-- Multi-select files with keyboard modifiers
-- Back navigation, clickable breadcrumbs, folder search, and drag-and-drop uploads
-- Blocks path traversal and symbolic-link escapes outside the configured root
+- Browse, upload, preview, download, copy, rename, and delete files
+- Create folders, view file sizes, and discover mounted filesystems
+- Select multiple nodes from one browser UI
+- Keep agent credentials on the hub; they are never sent to the browser
+- Stream uploads and downloads through the hub
+- Restrict listeners to a specific Tailscale, WireGuard, or other private-network address
+- Prevent lexical path traversal and symbolic-link escapes beyond the configured root
+- Run on AMD64 and ARM64 Linux hosts supported by Node.js or Docker
 
-## Quick start
+## Choose a deployment
+
+| Goal | Deployment |
+|---|---|
+| Browse one safe directory | [Standalone mode](#standalone-mode) |
+| Browse several nodes | [Distributed deployment](#distributed-deployment) |
+| Browse a Linux host without Docker | [Native systemd agent](#native-systemd-agent) |
+| Include Home Assistant OS storage | [Home Assistant app](#home-assistant-app) |
+
+## Security model
+
+This application can modify and permanently delete files.
+
+Standalone mode has no built-in authentication and binds to localhost through the supplied Compose file. Distributed agents require independent bearer tokens, but the hub UI itself has no login screen. The private network and its access controls are therefore the user-facing authorization boundary.
+
+For a Tailscale-only deployment:
+
+1. Set `PRIVATE_IP` to the machine's Tailscale IPv4 address, not `0.0.0.0` or its LAN address.
+2. Do not publish ports `3090` or `3091` through a public proxy or router.
+3. Use a distinct random token for every agent.
+4. Restrict which Tailscale users/devices can reach the hub with Tailscale grants or ACLs.
+5. Keep node configuration and tokens outside the repository with mode `0600`.
+
+Exposing `/` gives the agent root-equivalent read/write access. Use a narrower `FILEMANAGER_ROOT` or mount when full-host access is unnecessary.
+
+## Requirements
+
+- Docker Engine with Compose v2 for the Compose deployment, or Node.js 18+ and systemd for the native agent
+- A routed private network between the hub and agents
+- `tar` for bulk downloads
+- One unused TCP port per process; examples use `3090` for the hub and `3091` for agents
+
+## Standalone mode
+
+This mode exposes one host directory and keeps listening on localhost.
 
 ```bash
+git clone https://github.com/purva-labs/file-manager.git
+cd file-manager
 cp .env.example .env
-# Edit FILEMANAGER_ROOT to the host folder you want to expose.
+mkdir -p data
 docker compose up -d --build
 ```
 
-Open <http://localhost:3088>.
+Set `FILEMANAGER_ROOT` in `.env` to the host directory you want to expose. Open `http://127.0.0.1:3088` locally or place it behind an authenticated private reverse proxy.
 
-## Configuration
+## Distributed deployment
 
-The application has one configurable environment variable:
+The lightweight deployment keeps only two components: one hub and one small agent per node. Node state remains in a JSON file with root-only credential files; no database, queue, or service discovery stack is required.
 
-```dotenv
-FILEMANAGER_ROOT=/absolute/host/path
+### 1. Start the hub
+
+```bash
+git clone https://github.com/purva-labs/file-manager.git
+cd file-manager
+mkdir -p file-manager-state
+PRIVATE_IP="$(tailscale ip -4)" docker compose -f deploy/compose-hub.yml up -d --build
 ```
 
-Compose mounts that host folder at `/data` inside the container. The application cannot browse outside that mount.
+Open `http://<PRIVATE_IP>:3090` from an authorized private-network device. The hub creates its state files automatically.
 
-## Security
+### 2. Add each node
 
-File Manager can modify and permanently delete files. It intentionally binds to `127.0.0.1` by default and does not include authentication. Keep it private, or place it behind an authenticated reverse proxy before exposing it to a network.
+1. Select **Add node** in the UI.
+2. Enter a name and confirm the private URL agents use to reach the hub.
+3. Select **Generate install command**.
+4. Run the displayed command once on the new Linux node.
 
-Use a dedicated directory and give the container only the permissions it needs. Do not mount `/`, your Docker socket, SSH configuration, or secret directories.
+The command downloads the matching agent bundle directly from your hub, installs and starts the systemd service, then exchanges its single-use 15-minute enrollment code for a unique permanent credential. It does not depend on a separate release download. The permanent credential is never included in the command, and the node appears without editing JSON or restarting the hub.
+
+To add the hub machine itself, run its generated command on the hub host too.
+
+The automatic installer detects the node's Tailscale IPv4 address. On another private network, append a specific address:
+
+```bash
+--listen-host 10.0.0.25
+```
+
+The manual Compose files remain available for users who prefer immutable, externally managed node configuration.
+
+## Native systemd agent
+
+Use this on Debian, Ubuntu, Raspberry Pi OS, or another systemd-based Linux node where Node.js 18+ is available.
+
+Normally, use the command generated by the hub. For a manual checkout-based installation:
+
+```bash
+sudo ./deploy/install-agent.sh --listen-host "$(tailscale ip -4)"
+```
+
+The installer:
+
+- installs the application at `/opt/file-manager-agent`
+- stores configuration and the token under `/etc/file-manager-agent`
+- binds only to the address passed with `--listen-host`
+- enables `file-manager-agent.service` at boot
+- retains the prior application directory as `/opt/file-manager-agent.previous` during an update
+- never prints the generated token
+
+To expose only a subtree:
+
+```bash
+sudo ./deploy/install-agent.sh \
+  --listen-host "$(tailscale ip -4)" \
+  --root /srv/storage \
+  --display-root /storage
+```
+
+For automatic enrollment, the installer sends the permanent credential directly to the hub over the configured private network. Manual installations can still copy `/etc/file-manager-agent/token` into an externally managed hub configuration.
+
+Useful checks:
+
+```bash
+sudo systemctl status file-manager-agent
+sudo ss -ltnp | grep 3091
+curl -i http://<AGENT_PRIVATE_IP>:3091/api/config  # should return 401 without a token
+```
+
+Re-run the installer from a newer checkout to update an existing native agent. The token is preserved.
+
+## Home Assistant app
+
+The repository can produce a self-contained local Home Assistant app package for AMD64 and ARM64 systems.
+
+1. Build the bundle: `./deploy/package-homeassistant-addon.sh`.
+2. Copy `dist/homeassistant-addon` into `/addons/file-manager-agent` on Home Assistant OS.
+3. In Home Assistant, open **Settings → Apps → App store**, refresh, and install **File Manager Agent** from local apps.
+4. Set `listen_host` to an address reachable only from the hub. The safe default `127.0.0.1` is intentionally not remotely reachable.
+5. Start the app and securely transfer its generated `agent-token` from the app data directory to the hub. For a local installation, the directory is normally `/addon_configs/local_file_manager_agent`; confirm the installed app identifier with `ha addons list` rather than assuming it.
+6. Add the node and its reachable URL to `nodes.json`.
+
+Home Assistant OS does not expose its immutable host root to apps. This package exposes the writable configuration, local-app, app-configuration, backup, media, share, and SSL areas made available by the Supervisor.
+
+## Configuration reference
+
+### Application and agent
+
+| Variable | Default | Purpose |
+|---|---:|---|
+| `PORT` | `3088` | Listener port; Compose agent examples override it to `3091` |
+| `FILEMANAGER_LISTEN_HOST` | `0.0.0.0` | Listener address; always set this explicitly for distributed mode |
+| `FILEMANAGER_ROOT` | `/srv` | Real filesystem subtree available to the process |
+| `FILEMANAGER_DISPLAY_ROOT` | same as root | Virtual path shown in the UI |
+| `FILEMANAGER_MODE` | `standalone` | Set to `agent` to require bearer authentication |
+| `FILEMANAGER_AGENT_TOKEN_FILE` | unset | Path to the agent's token file |
+
+### Hub
+
+| Variable | Default | Purpose |
+|---|---:|---|
+| `PORT` | `3090` | Hub/UI port |
+| `FILEMANAGER_LISTEN_HOST` | `127.0.0.1` | Hub listener address |
+| `FILEMANAGER_NODES_FILE` | `/run/file-manager/nodes.json` | Private node configuration |
+| `FILEMANAGER_SECRETS_DIR` | `/run/file-manager/secrets` | Root-only per-node credentials |
+| `FILEMANAGER_ENROLLMENT_URL` | listener URL when private | Hub URL placed in generated commands |
+
+## Updating and backup
+
+Back up the hub's `nodes.json` and token directory. They are the only deployment-specific state. File Manager does not maintain a database.
+
+For Docker deployments:
+
+```bash
+git pull --ff-only
+PRIVATE_IP="$(tailscale ip -4)" docker compose -f deploy/compose-hub.yml up -d --build
+```
+
+For native agents, pull the new checkout and re-run `deploy/install-agent.sh` with the same arguments.
+
+To remove a native agent, stop and disable `file-manager-agent.service`, then remove only `/etc/systemd/system/file-manager-agent.service`, `/opt/file-manager-agent`, and `/etc/file-manager-agent`. The last directory contains the node token, so back it up first if you plan to reinstall with the same hub configuration.
 
 ## Development
 
 ```bash
 npm ci
-FILEMANAGER_ROOT="$PWD/data" npm start
 npm test
+npm audit --audit-level=high
+FILEMANAGER_ROOT="$PWD/data" npm start
+./deploy/package-homeassistant-addon.sh
 ```
 
-## License
-
-MIT. See [LICENSE](LICENSE).
+See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and the MIT [LICENSE](LICENSE).

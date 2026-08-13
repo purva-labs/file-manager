@@ -3,3 +3,8 @@ node_modules/
 .DS_Store
 npm-debug.log*
 data/
+deploy/*.env
+deploy/nodes.json
+deploy/secrets/
+.deploy/
+dist/

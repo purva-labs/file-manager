@@ -7,6 +7,12 @@ const appBasePath = window.location.pathname.startsWith('/admin-proxy/filemanage
   ? '/admin-proxy/filemanager'
   : '';
 const appUrl = (pathValue) => `${appBasePath}${pathValue}`;
+const query = new URLSearchParams(window.location.search);
+const nodeId = query.get('node');
+const nodeApiUrl = (pathValue) => {
+  if (!nodeId || !pathValue.startsWith('/api')) return appUrl(pathValue);
+  return appUrl(`/api/nodes/${encodeURIComponent(nodeId)}${pathValue.slice(4)}`);
+};
 
 function showToast(message, duration = 2200) {
   toastEl.textContent = message;
@@ -15,7 +21,7 @@ function showToast(message, duration = 2200) {
 }
 
 async function apiGet(url) {
-  const response = await fetch(appUrl(url));
+  const response = await fetch(nodeApiUrl(url));
   if (!response.ok) {
     const errorBody = await response.json().catch(() => ({}));
     throw new Error(errorBody.error || `Request failed: ${response.status}`);
@@ -33,7 +39,6 @@ backButtonEl.addEventListener('click', () => {
 });
 
 (async function initializeViewer() {
-  const query = new URLSearchParams(window.location.search);
   const filePath = query.get('path');
 
   if (!filePath) {

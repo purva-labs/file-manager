@@ -1,0 +1,31 @@
+services:
+  hub:
+    build: ..
+    container_name: file-manager-hub
+    command: ["node", "src/hub.js"]
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      PORT: ${HUB_PORT:-3090}
+      FILEMANAGER_LISTEN_HOST: ${PRIVATE_IP:?Set PRIVATE_IP to this node's private-network address}
+      FILEMANAGER_NODES_FILE: /run/file-manager/nodes.json
+      FILEMANAGER_SECRETS_DIR: /run/file-manager/secrets
+    volumes:
+      - ${NODES_FILE:?Set NODES_FILE}:/run/file-manager/nodes.json:rw
+      - ${SECRETS_DIR:?Set SECRETS_DIR}:/run/file-manager/secrets:rw
+
+  agent:
+    build: ..
+    container_name: file-manager-agent
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      PORT: ${AGENT_PORT:-3091}
+      FILEMANAGER_LISTEN_HOST: ${PRIVATE_IP:?Set PRIVATE_IP to this node's private-network address}
+      FILEMANAGER_MODE: agent
+      FILEMANAGER_ROOT: /host
+      FILEMANAGER_DISPLAY_ROOT: /
+      FILEMANAGER_AGENT_TOKEN_FILE: /run/secrets/agent-token
+    volumes:
+      - /:/host:rw,rslave
+      - ${AGENT_TOKEN_FILE:?Set AGENT_TOKEN_FILE}:/run/secrets/agent-token:ro

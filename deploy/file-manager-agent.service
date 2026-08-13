@@ -1,0 +1,21 @@
+[Unit]
+Description=Distributed File Manager root agent
+After=network-online.target tailscaled.service
+Wants=network-online.target tailscaled.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+EnvironmentFile=/etc/file-manager-agent/agent.env
+Environment=FILEMANAGER_MODE=agent
+Environment=FILEMANAGER_ROOT=/
+Environment=FILEMANAGER_DISPLAY_ROOT=/
+Environment=FILEMANAGER_AGENT_TOKEN_FILE=/etc/file-manager-agent/token
+ExecStart=/usr/bin/node /opt/file-manager-agent/src/server.js
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

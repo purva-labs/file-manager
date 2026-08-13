@@ -1,32 +1,90 @@
 const express = require('express');
 const path = require('path');
 const fs = require('fs/promises');
+const fsSync = require('fs');
 const os = require('os');
+const crypto = require('crypto');
 const { spawn } = require('child_process');
 const multer = require('multer');
 
 const app = express();
-const PORT = 3088;
+const PORT = Number(process.env.PORT || 3088);
+const LISTEN_HOST = process.env.FILEMANAGER_LISTEN_HOST || '0.0.0.0';
+const MODE = process.env.FILEMANAGER_MODE || 'standalone';
 const ROOT_PATH = path.resolve(process.env.FILEMANAGER_ROOT || '/srv');
+const DISPLAY_ROOT_PATH = path.resolve(process.env.FILEMANAGER_DISPLAY_ROOT || ROOT_PATH);
 const MAX_PREVIEW_BYTES = 2 * 1024 * 1024;
 const MAX_UPLOAD_FILE_BYTES = 512 * 1024 * 1024;
 const MAX_UPLOAD_FILES = 100;
+const DIRECTORY_STAT_CONCURRENCY = 48;
 const ROOT_REAL_PATH = fs.realpath(ROOT_PATH);
+const STORAGE_FILESYSTEM_TYPES = new Set([
+  'btrfs', 'cifs', 'exfat', 'ext2', 'ext3', 'ext4', 'fuseblk',
+  'nfs', 'nfs4', 'ntfs', 'ntfs3', 'vfat', 'xfs', 'zfs',
+]);
+const NETWORK_FILESYSTEM_TYPES = new Set(['cifs', 'nfs', 'nfs4']);
+
+function readAgentToken() {
+  if (process.env.FILEMANAGER_AGENT_TOKEN_FILE) {
+    return fsSync.readFileSync(process.env.FILEMANAGER_AGENT_TOKEN_FILE, 'utf8').trim();
+  }
+  return String(process.env.FILEMANAGER_AGENT_TOKEN || '').trim();
+}
+
+const AGENT_TOKEN = readAgentToken();
+
+if (MODE === 'agent' && !AGENT_TOKEN) {
+  throw new Error('Agent mode requires FILEMANAGER_AGENT_TOKEN_FILE or FILEMANAGER_AGENT_TOKEN.');
+}
+if (MODE === 'agent' && Buffer.byteLength(AGENT_TOKEN) < 32) {
+  throw new Error('Agent token must contain at least 32 bytes.');
+}
+
+function tokenMatches(candidate) {
+  const actual = Buffer.from(AGENT_TOKEN);
+  const supplied = Buffer.from(candidate);
+  return actual.length === supplied.length && crypto.timingSafeEqual(actual, supplied);
+}
+
+if (MODE === 'agent') {
+  app.use((req, res, next) => {
+    const authorization = String(req.get('authorization') || '');
+    const candidate = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
+    if (!candidate || !tokenMatches(candidate)) {
+      return res.status(401).json({ error: 'Agent authentication required.' });
+    }
+    next();
+  });
+}
 
 app.use(express.json({ limit: '1mb' }));
-app.use(express.static(path.join(__dirname, '..', 'public')));
+if (MODE !== 'agent') {
+  app.use(express.static(path.join(__dirname, '..', 'public')));
+}
 
 function isWithin(base, target) {
-  if (base === target) return true;
-  return target.startsWith(`${base}${path.sep}`);
+  const relativePath = path.relative(base, target);
+  return relativePath === '' || (!relativePath.startsWith('..') && !path.isAbsolute(relativePath));
 }
 
 async function resolveSafePath(inputPath) {
   const rootRealPath = await ROOT_REAL_PATH;
   const rawPath = String(inputPath || '').trim();
-  const candidate = rawPath
-    ? (path.isAbsolute(rawPath) ? path.resolve(rawPath) : path.resolve(rootRealPath, rawPath))
-    : rootRealPath;
+  let candidate = rootRealPath;
+
+  if (rawPath) {
+    if (path.isAbsolute(rawPath) && DISPLAY_ROOT_PATH !== ROOT_PATH) {
+      const displayCandidate = path.resolve(rawPath);
+      if (!isWithin(DISPLAY_ROOT_PATH, displayCandidate)) {
+        const err = new Error('Path outside of allowed root.');
+        err.statusCode = 400;
+        throw err;
+      }
+      candidate = path.resolve(rootRealPath, path.relative(DISPLAY_ROOT_PATH, displayCandidate));
+    } else {
+      candidate = path.isAbsolute(rawPath) ? path.resolve(rawPath) : path.resolve(rootRealPath, rawPath);
+    }
+  }
 
   if (!isWithin(ROOT_PATH, candidate) && !isWithin(rootRealPath, candidate)) {
     const err = new Error('Path outside of allowed root.');
@@ -49,6 +107,12 @@ async function resolveSafePath(inputPath) {
   }
 
   return realCandidate;
+}
+
+async function toDisplayPath(safePath) {
+  const rootRealPath = await ROOT_REAL_PATH;
+  const relativePath = path.relative(rootRealPath, safePath);
+  return relativePath ? path.join(DISPLAY_ROOT_PATH, relativePath) : DISPLAY_ROOT_PATH;
 }
 
 async function toRelativePath(safePath) {
@@ -153,7 +217,7 @@ async function resolveUploadTargetName(destinationDir, sourceName) {
 
 const uploadStorage = multer.diskStorage({
   destination(req, file, cb) {
-    const destinationInput = req.query && typeof req.query.path === 'string' ? req.query.path : ROOT_PATH;
+    const destinationInput = req.query && typeof req.query.path === 'string' ? req.query.path : DISPLAY_ROOT_PATH;
     Promise.resolve()
       .then(async () => {
         const destinationPath = await resolveSafePath(destinationInput);
@@ -168,7 +232,7 @@ const uploadStorage = multer.diskStorage({
       .catch((error) => cb(error));
   },
   filename(req, file, cb) {
-    const destinationInput = req.query && typeof req.query.path === 'string' ? req.query.path : ROOT_PATH;
+    const destinationInput = req.query && typeof req.query.path === 'string' ? req.query.path : DISPLAY_ROOT_PATH;
     Promise.resolve()
       .then(async () => {
         const destinationPath = await resolveSafePath(destinationInput);
@@ -295,6 +359,165 @@ async function getFilesystemUsage(targetPath) {
   }
 }
 
+function decodeMountField(value) {
+  return String(value || '').replace(/\\([0-7]{3})/g, (match, octal) =>
+    String.fromCharCode(Number.parseInt(octal, 8))
+  );
+}
+
+function parseMountInfo(content) {
+  const mounts = [];
+  for (const line of String(content || '').split('\n')) {
+    if (!line.trim()) continue;
+    const sections = line.split(' - ');
+    if (sections.length !== 2) continue;
+    const left = sections[0].split(' ');
+    const right = sections[1].split(' ');
+    if (left.length < 6 || right.length < 3) continue;
+    mounts.push({
+      mountPath: decodeMountField(left[4]),
+      options: left[5].split(','),
+      type: right[0],
+      source: decodeMountField(right[1]),
+    });
+  }
+  return mounts;
+}
+
+async function listStorageFilesystems() {
+  const rootRealPath = await ROOT_REAL_PATH;
+  const mountInfo = await fs.readFile('/proc/self/mountinfo', 'utf8');
+  const filesystems = [];
+  const seen = new Set();
+
+  for (const mount of parseMountInfo(mountInfo)) {
+    if (!STORAGE_FILESYSTEM_TYPES.has(mount.type)) continue;
+    if (!isWithin(rootRealPath, mount.mountPath)) continue;
+
+    const displayPath = await toDisplayPath(mount.mountPath);
+    const key = `${mount.source}\u0000${displayPath}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    try {
+      const usage = await getFilesystemUsage(mount.mountPath);
+      filesystems.push({
+        mountPath: displayPath,
+        source: mount.source,
+        type: mount.type,
+        network: NETWORK_FILESYSTEM_TYPES.has(mount.type),
+        writable: mount.options.includes('rw'),
+        ...usage,
+      });
+    } catch {
+      // A removable or network filesystem can disappear during discovery.
+    }
+  }
+
+  filesystems.sort((a, b) => {
+    if (a.mountPath === DISPLAY_ROOT_PATH) return -1;
+    if (b.mountPath === DISPLAY_ROOT_PATH) return 1;
+    return a.mountPath.localeCompare(b.mountPath);
+  });
+  return filesystems;
+}
+
+function summarizeLocalFilesystems(filesystems) {
+  const localFilesystems = [];
+  const seenSources = new Set();
+
+  for (const filesystem of filesystems) {
+    if (filesystem.network || NETWORK_FILESYSTEM_TYPES.has(filesystem.type)) continue;
+    const sourceKey = String(filesystem.source || filesystem.mountPath || '').trim();
+    if (!sourceKey || seenSources.has(sourceKey)) continue;
+    seenSources.add(sourceKey);
+    localFilesystems.push(filesystem);
+  }
+
+  return localFilesystems.reduce((summary, filesystem) => ({
+    filesystemCount: summary.filesystemCount + 1,
+    totalBytes: summary.totalBytes + Number(filesystem.totalBytes || 0),
+    usedBytes: summary.usedBytes + Number(filesystem.usedBytes || 0),
+    freeBytes: summary.freeBytes + Number(filesystem.freeBytes || 0),
+    availableBytes: summary.availableBytes + Number(filesystem.availableBytes || 0),
+  }), {
+    filesystemCount: 0,
+    totalBytes: 0,
+    usedBytes: 0,
+    freeBytes: 0,
+    availableBytes: 0,
+  });
+}
+
+function getStorageDeviceSource(source) {
+  const value = String(source || '').trim();
+  if (!value.startsWith('/dev/')) return value;
+  if (/^\/dev\/(nvme\d+n\d+|mmcblk\d+|md\d+)p\d+$/.test(value)) {
+    return value.replace(/p\d+$/, '');
+  }
+  if (/^\/dev\/(sd|vd|xvd|hd)[a-z]+\d+$/.test(value)) {
+    return value.replace(/\d+$/, '');
+  }
+  return value;
+}
+
+function summarizeLocalDevices(filesystems) {
+  const devices = new Map();
+  const seenSources = new Set();
+
+  for (const filesystem of filesystems) {
+    if (filesystem.network || NETWORK_FILESYSTEM_TYPES.has(filesystem.type)) continue;
+    const source = String(filesystem.source || filesystem.mountPath || '').trim();
+    if (!source || seenSources.has(source)) continue;
+    seenSources.add(source);
+
+    const device = getStorageDeviceSource(source) || source;
+    const summary = devices.get(device) || {
+      device,
+      primary: false,
+      filesystemCount: 0,
+      mountPaths: [],
+      totalBytes: 0,
+      usedBytes: 0,
+      freeBytes: 0,
+      availableBytes: 0,
+    };
+    summary.primary ||= filesystem.mountPath === DISPLAY_ROOT_PATH;
+    summary.filesystemCount += 1;
+    summary.mountPaths.push(filesystem.mountPath);
+    summary.totalBytes += Number(filesystem.totalBytes || 0);
+    summary.usedBytes += Number(filesystem.usedBytes || 0);
+    summary.freeBytes += Number(filesystem.freeBytes || 0);
+    summary.availableBytes += Number(filesystem.availableBytes || 0);
+    devices.set(device, summary);
+  }
+
+  return [...devices.values()].sort((a, b) => {
+    if (a.primary !== b.primary) return a.primary ? -1 : 1;
+    return a.device.localeCompare(b.device);
+  });
+}
+
+async function addBlockDeviceMetadata(deviceSummary) {
+  if (!deviceSummary.device.startsWith('/dev/')) return deviceSummary;
+  const blockName = path.basename(deviceSummary.device);
+  const sysfsRoot = path.join('/sys/class/block', blockName);
+
+  try {
+    const [model, rotational] = await Promise.all([
+      fs.readFile(path.join(sysfsRoot, 'device/model'), 'utf8').catch(() => ''),
+      fs.readFile(path.join(sysfsRoot, 'queue/rotational'), 'utf8').catch(() => ''),
+    ]);
+    return {
+      ...deviceSummary,
+      model: model.trim() || null,
+      mediaType: rotational.trim() === '1' ? 'HDD' : rotational.trim() === '0' ? 'SSD' : null,
+    };
+  } catch {
+    return deviceSummary;
+  }
+}
+
 async function computeDirectorySize(targetPath) {
   let stats;
   try {
@@ -341,9 +564,26 @@ function formatEntryType(entry, stats) {
   return stats.isDirectory() ? 'directory' : 'other';
 }
 
+async function mapWithConcurrency(items, concurrency, mapper) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await mapper(items[index], index);
+    }
+  }
+
+  const workerCount = Math.min(Math.max(1, concurrency), items.length);
+  await Promise.all(Array.from({ length: workerCount }, worker));
+  return results;
+}
+
 app.get('/api/config', (req, res) => {
   res.json({
-    rootPath: ROOT_PATH,
+    rootPath: DISPLAY_ROOT_PATH,
   });
 });
 
@@ -351,7 +591,7 @@ app.get('/api/storage', async (req, res, next) => {
   try {
     const usage = await getFilesystemUsage(ROOT_PATH);
     res.json({
-      rootPath: ROOT_PATH,
+      rootPath: DISPLAY_ROOT_PATH,
       totalBytes: usage.totalBytes,
       usedBytes: usage.usedBytes,
       freeBytes: usage.freeBytes,
@@ -362,9 +602,23 @@ app.get('/api/storage', async (req, res, next) => {
   }
 });
 
+app.get('/api/filesystems', async (req, res, next) => {
+  try {
+    const filesystems = await listStorageFilesystems();
+    const localDevices = await Promise.all(summarizeLocalDevices(filesystems).map(addBlockDeviceMetadata));
+    res.json({
+      filesystems,
+      localSummary: summarizeLocalFilesystems(filesystems),
+      localDevices,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get('/api/list', async (req, res, next) => {
   try {
-    const requestedPath = req.query.path ? String(req.query.path) : ROOT_PATH;
+    const requestedPath = req.query.path ? String(req.query.path) : DISPLAY_ROOT_PATH;
     const safePath = await resolveSafePath(requestedPath);
     const rootStats = await fs.lstat(safePath);
 
@@ -373,24 +627,24 @@ app.get('/api/list', async (req, res, next) => {
     }
 
     const dirents = await fs.readdir(safePath, { withFileTypes: true });
-    const entries = [];
-
-    for (const dirent of dirents) {
+    const listedEntries = await mapWithConcurrency(dirents, DIRECTORY_STAT_CONCURRENCY, async (dirent) => {
       const itemPath = path.join(safePath, dirent.name);
 
       try {
         const stats = await fs.lstat(itemPath);
-        entries.push({
+        return {
           name: dirent.name,
-          path: itemPath,
+          path: await toDisplayPath(itemPath),
           type: formatEntryType(dirent, stats),
           size: stats.isFile() ? stats.size : null,
           modifiedAt: stats.mtime.toISOString(),
-        });
+        };
       } catch {
         // Ignore files that disappear while listing.
+        return null;
       }
-    }
+    });
+    const entries = listedEntries.filter(Boolean);
 
     entries.sort((a, b) => {
       if (a.type === 'directory' && b.type !== 'directory') return -1;
@@ -398,7 +652,7 @@ app.get('/api/list', async (req, res, next) => {
       return a.name.localeCompare(b.name);
     });
 
-    res.json({ path: safePath, entries });
+    res.json({ path: await toDisplayPath(safePath), entries });
   } catch (error) {
     next(error);
   }
@@ -416,7 +670,7 @@ app.get('/api/usage', async (req, res, next) => {
         const size = stats.isDirectory() ? await computeDirectorySize(entryPath) : stats.size;
         usage.push({
           name: entry.name,
-          path: entryPath,
+          path: await toDisplayPath(entryPath),
           type: stats.isDirectory() ? 'directory' : 'file',
           size,
           modifiedAt: stats.mtime.toISOString(),
@@ -428,7 +682,7 @@ app.get('/api/usage', async (req, res, next) => {
 
     usage.sort((a, b) => b.size - a.size);
 
-    res.json({ rootPath: ROOT_PATH, usage });
+    res.json({ rootPath: DISPLAY_ROOT_PATH, usage });
   } catch (error) {
     next(error);
   }
@@ -436,13 +690,13 @@ app.get('/api/usage', async (req, res, next) => {
 
 app.get('/api/size', async (req, res, next) => {
   try {
-    const requestedPath = req.query.path ? String(req.query.path) : ROOT_PATH;
+    const requestedPath = req.query.path ? String(req.query.path) : DISPLAY_ROOT_PATH;
     const safePath = await resolveSafePath(requestedPath);
     const stats = await fs.lstat(safePath);
 
     const size = stats.isDirectory() ? await computeDirectorySize(safePath) : stats.size;
 
-    res.json({ path: safePath, size });
+    res.json({ path: await toDisplayPath(safePath), size });
   } catch (error) {
     next(error);
   }
@@ -476,7 +730,7 @@ app.get('/api/file', async (req, res, next) => {
     const content = contentBuffer.toString('utf8');
 
     res.json({
-      path: safePath,
+      path: await toDisplayPath(safePath),
       name: path.basename(safePath),
       size: stats.size,
       modifiedAt: stats.mtime.toISOString(),
@@ -497,13 +751,13 @@ app.delete('/api/delete', async (req, res, next) => {
 
     const safePath = await resolveSafePath(targetPath);
 
-    if (safePath === ROOT_PATH) {
+    if (safePath === await ROOT_REAL_PATH) {
       return res.status(400).json({ error: 'Refusing to delete root path.' });
     }
 
     await fs.rm(safePath, { recursive: true, force: false });
 
-    res.json({ ok: true, deleted: safePath });
+    res.json({ ok: true, deleted: await toDisplayPath(safePath) });
   } catch (error) {
     if (error.code === 'ENOENT') {
       return res.status(404).json({ error: 'Path not found.' });
@@ -528,11 +782,11 @@ app.post('/api/bulk-delete', async (req, res, next) => {
     for (const targetPath of deduped) {
       try {
         const safePath = await resolveSafePath(targetPath);
-        if (safePath === ROOT_PATH) {
+        if (safePath === await ROOT_REAL_PATH) {
           throw new Error('Refusing to delete root path.');
         }
         await fs.rm(safePath, { recursive: true, force: false });
-        deleted.push(safePath);
+        deleted.push(await toDisplayPath(safePath));
       } catch (error) {
         failed.push({
           path: targetPath,
@@ -567,7 +821,7 @@ app.post('/api/bulk-download', async (req, res, next) => {
 
     for (const targetPath of deduped) {
       const safePath = await resolveSafePath(targetPath);
-      if (safePath === ROOT_PATH) {
+      if (safePath === await ROOT_REAL_PATH) {
         return res.status(400).json({ error: 'Refusing to download root path as bulk archive.' });
       }
       await fs.lstat(safePath);
@@ -606,7 +860,7 @@ app.post('/api/bulk-download', async (req, res, next) => {
 app.post('/api/paste', async (req, res, next) => {
   try {
     const inputSources = Array.isArray(req.body?.sources) ? req.body.sources : [];
-    const destinationInput = typeof req.body?.destination === 'string' ? req.body.destination : ROOT_PATH;
+    const destinationInput = typeof req.body?.destination === 'string' ? req.body.destination : DISPLAY_ROOT_PATH;
 
     const dedupedSources = [...new Set(inputSources.filter((value) => typeof value === 'string' && value.trim() !== ''))];
     if (dedupedSources.length === 0) {
@@ -625,7 +879,7 @@ app.post('/api/paste', async (req, res, next) => {
     for (const sourceInput of dedupedSources) {
       try {
         const sourcePath = await resolveSafePath(sourceInput);
-        if (sourcePath === ROOT_PATH) {
+        if (sourcePath === await ROOT_REAL_PATH) {
           throw new Error('Refusing to copy root path.');
         }
 
@@ -641,7 +895,7 @@ app.post('/api/paste', async (req, res, next) => {
           errorOnExist: true,
           preserveTimestamps: true,
         });
-        pasted.push(targetPath);
+        pasted.push(await toDisplayPath(targetPath));
       } catch (error) {
         failed.push({
           path: sourceInput,
@@ -658,9 +912,13 @@ app.post('/api/paste', async (req, res, next) => {
 
 app.post('/api/folder', async (req, res, next) => {
   try {
-    const folderPath = await resolveSafeChildPath(req.body?.parent || ROOT_PATH, req.body?.name);
+    const folderPath = await resolveSafeChildPath(req.body?.parent || DISPLAY_ROOT_PATH, req.body?.name);
     await fs.mkdir(folderPath);
-    res.status(201).json({ ok: true, path: folderPath, name: path.basename(folderPath) });
+    res.status(201).json({
+      ok: true,
+      path: await toDisplayPath(folderPath),
+      name: path.basename(folderPath),
+    });
   } catch (error) {
     if (error.code === 'EEXIST') {
       return res.status(409).json({ error: 'A file or folder with that name already exists.' });
@@ -682,7 +940,12 @@ app.post('/api/rename', async (req, res, next) => {
     }
 
     await fs.rename(sourcePath, targetPath);
-    res.json({ ok: true, oldPath: sourcePath, path: targetPath, name: path.basename(targetPath) });
+    res.json({
+      ok: true,
+      oldPath: await toDisplayPath(sourcePath),
+      path: await toDisplayPath(targetPath),
+      name: path.basename(targetPath),
+    });
   } catch (error) {
     next(error);
   }
@@ -695,11 +958,11 @@ app.post('/api/upload', uploadMiddleware.array('files', MAX_UPLOAD_FILES), async
       return res.status(400).json({ error: 'No files were uploaded.' });
     }
 
-    const uploaded = uploadedFiles.map((file) => ({
+    const uploaded = await Promise.all(uploadedFiles.map(async (file) => ({
       name: file.filename,
-      path: file.path,
+      path: await toDisplayPath(file.path),
       size: file.size,
-    }));
+    })));
 
     res.json({ ok: true, uploaded });
   } catch (error) {
@@ -715,10 +978,23 @@ app.use((error, req, res, next) => {
 });
 
 if (require.main === module) {
-  app.listen(PORT, () => {
+  app.listen(PORT, LISTEN_HOST, () => {
     // eslint-disable-next-line no-console
-    console.log(`File Manager listening on port ${PORT}. Root: ${ROOT_PATH}`);
+    console.log(`File Manager ${MODE} listening on ${LISTEN_HOST}:${PORT}. Root: ${ROOT_PATH}`);
   });
 }
 
-module.exports = { app, isWithin, resolveSafePath, resolveSafeChildPath, validateEntryName };
+module.exports = {
+  app,
+  getStorageDeviceSource,
+  isWithin,
+  listStorageFilesystems,
+  mapWithConcurrency,
+  parseMountInfo,
+  resolveSafePath,
+  summarizeLocalFilesystems,
+  summarizeLocalDevices,
+  resolveSafeChildPath,
+  toDisplayPath,
+  validateEntryName,
+};

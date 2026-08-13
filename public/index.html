@@ -12,86 +12,149 @@
   </head>
   <body>
     <div class="app-shell">
-      <aside class="sidebar">
+      <header class="app-header">
         <div class="brand">
-          <div class="dot"></div>
+          <div class="brand-mark" aria-hidden="true">
+            <span class="brand-folder"></span>
+          </div>
           <div>
             <h1>File Manager</h1>
-            <p id="rootPath">Loading root...</p>
+            <p>Open-source multi-node file explorer</p>
           </div>
         </div>
-        <section class="storage-card" aria-live="polite">
-          <p class="storage-label">Storage</p>
-          <p id="storageSummary" class="storage-summary">Loading disk usage...</p>
-          <div class="storage-meter" role="progressbar" aria-label="Disk usage">
-            <span id="storageBarUsed" class="storage-used" style="width: 0%"></span>
-            <span id="storageBarFree" class="storage-free" style="width: 100%"></span>
-          </div>
-          <p id="storageMeta" class="storage-meta">-</p>
-        </section>
-      </aside>
 
-      <main class="content">
-        <header class="toolbar">
-          <button id="backButton" class="icon-btn" type="button" aria-label="Back">
-            <span class="btn-icon" aria-hidden="true">&#x2190;</span>
-            <span>Back</span>
-          </button>
-          <div id="breadcrumbs" class="breadcrumbs"></div>
-          <label class="search-box" for="searchInput">
-            <span aria-hidden="true">&#x2315;</span>
-            <input id="searchInput" type="search" placeholder="Search this folder" autocomplete="off" spellcheck="false" />
-          </label>
-          <button id="uploadButton" type="button" aria-label="Upload files">
-            <span aria-hidden="true">&#x2B06;</span>
-            <span>Upload</span>
-          </button>
-          <button id="newFolderButton" type="button">New folder</button>
-          <button id="refreshButton" type="button">Refresh</button>
-        </header>
+        <label class="search-box" for="searchInput">
+          <span class="search-icon" aria-hidden="true"></span>
+          <input id="searchInput" type="search" placeholder="Search this folder..." autocomplete="off" spellcheck="false" />
+          <span class="keyboard-hint" aria-hidden="true">Ctrl K</span>
+        </label>
 
-        <section class="workspace">
-          <div id="selectionActions" class="selection-actions" aria-hidden="true">
-            <div id="selectionCount" class="selection-count">0 selected</div>
-            <div class="selection-buttons">
-              <button id="topCopyButton" type="button" aria-label="Copy selected items">
-                <span aria-hidden="true">&#x2398;</span>
-                <span>Copy</span>
-              </button>
-              <button id="topRenameButton" type="button" aria-label="Rename selected item">
-                <span aria-hidden="true">&#x270E;</span>
-                <span>Rename</span>
-              </button>
-              <button id="topPasteButton" type="button" aria-label="Paste copied items">
-                <span aria-hidden="true">&#x2399;</span>
-                <span>Paste</span>
-              </button>
-              <button id="topDownloadButton" type="button" aria-label="Download selected items">
-                <span aria-hidden="true">&#x2B07;</span>
-                <span>Download</span>
-              </button>
-              <button id="topDeleteButton" class="danger" type="button" aria-label="Delete selected items">
-                <span aria-hidden="true">&#x1F5D1;</span>
-                <span>Delete</span>
-              </button>
+        <div class="header-actions">
+          <button id="uploadButton" class="primary-action" type="button" aria-label="Upload files">
+            <span class="button-icon" aria-hidden="true">↑</span><span>Upload</span>
+          </button>
+          <button id="newFolderButton" type="button">
+            <span class="button-icon folder-plus" aria-hidden="true"></span><span>New folder</span>
+          </button>
+          <button id="refreshButton" class="square-button" type="button" aria-label="Refresh">
+            <span class="refresh-icon" aria-hidden="true">↻</span>
+          </button>
+          <button class="square-button help-button" type="button" aria-label="Help" title="Keyboard: Ctrl/Cmd+K search, Ctrl/Cmd+A select all">?</button>
+          <span class="user-avatar" aria-label="Current user">A</span>
+        </div>
+      </header>
+
+      <div class="main-layout">
+        <aside class="sidebar">
+          <section id="nodesCard" class="nodes-card" aria-label="Nodes" hidden>
+            <div class="section-heading">
+              <p class="section-label">Nodes</p>
+              <span id="nodeCount" class="section-meta"></span>
+            </div>
+            <div id="nodeButtons" class="node-buttons"></div>
+            <button id="addNodeButton" class="add-node-button" type="button"><span aria-hidden="true">＋</span>Add node</button>
+            <p id="nodeStatus" class="node-status" aria-live="polite">Select a node</p>
+          </section>
+        </aside>
+
+        <main class="content">
+          <header class="browser-toolbar">
+            <button id="backButton" class="square-button" type="button" aria-label="Back" title="Back">
+              <span aria-hidden="true">‹</span>
+            </button>
+            <div id="breadcrumbs" class="breadcrumbs" aria-label="Current path"></div>
+            <button class="square-button toolbar-more" type="button" aria-label="More actions" title="Right-click a file for more actions">•••</button>
+          </header>
+
+          <section class="workspace">
+            <div id="dropZone" class="table-frame">
+              <div class="drop-hint" aria-hidden="true">Drop files here to upload</div>
+              <div class="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th data-sort-key="name" aria-sort="ascending">
+                        <button class="sort-button active" type="button" data-sort-key="name"><span>Name</span><span class="sort-indicator" aria-hidden="true">↑</span></button>
+                      </th>
+                      <th data-sort-key="type" aria-sort="none">
+                        <button class="sort-button" type="button" data-sort-key="type"><span>Type</span><span class="sort-indicator" aria-hidden="true">↕</span></button>
+                      </th>
+                      <th data-sort-key="size" aria-sort="none">
+                        <button class="sort-button" type="button" data-sort-key="size"><span>Size</span><span class="sort-indicator" aria-hidden="true">↕</span></button>
+                      </th>
+                      <th data-sort-key="modifiedAt" aria-sort="none">
+                        <button class="sort-button" type="button" data-sort-key="modifiedAt"><span>Modified</span><span class="sort-indicator" aria-hidden="true">↕</span></button>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody id="entriesTableBody"></tbody>
+                </table>
+              </div>
+              <footer class="table-footer">
+                <span id="footerItemCount">0 items</span>
+                <span id="footerSelectionCount">0 selected</span>
+                <div class="pagination" aria-label="Pagination">
+                  <span id="paginationSummary">Showing 0 items</span>
+                  <button id="previousPageButton" type="button" aria-label="Previous page">‹</button>
+                  <button id="currentPageButton" type="button" class="current-page" aria-current="page">1</button>
+                  <button id="nextPageButton" type="button" aria-label="Next page">›</button>
+                </div>
+              </footer>
+            </div>
+          </section>
+        </main>
+      </div>
+
+      <section id="detailsDrawer" class="details-drawer" data-collapsed="false" aria-label="Selected node details">
+        <div class="drawer-grip" aria-hidden="true"></div>
+        <div class="drawer-tabs" role="tablist" aria-label="Node details">
+          <button class="drawer-tab active" type="button" role="tab" aria-selected="true" data-tab="storage"><span class="tab-icon disk-icon" aria-hidden="true"></span>Storage</button>
+          <button class="drawer-tab" type="button" role="tab" aria-selected="false" data-tab="filesystems"><span class="tab-icon drive-icon" aria-hidden="true"></span>Filesystems</button>
+          <button class="drawer-tab" type="button" role="tab" aria-selected="false" data-tab="recent"><span aria-hidden="true">◴</span>Recent</button>
+          <button class="drawer-tab" type="button" role="tab" aria-selected="false" data-tab="transfers"><span aria-hidden="true">⇅</span>Transfers</button>
+          <button id="drawerToggle" class="drawer-toggle" type="button" aria-expanded="true"><span>Collapse</span><span aria-hidden="true">⌄</span></button>
+        </div>
+
+        <div class="drawer-content">
+          <div class="drawer-panel active" data-panel="storage">
+            <div class="storage-layout" aria-live="polite">
+              <section class="storage-card storage-summary-card">
+                <p class="section-label">Local storage summary</p>
+                <p id="storageSummary" class="storage-summary">Loading disk usage...</p>
+                <div class="storage-meter" role="progressbar" aria-label="Disk usage">
+                  <span id="storageBarUsed" class="storage-used" style="width: 0%"></span>
+                  <span id="storageBarFree" class="storage-free" style="width: 100%"></span>
+                </div>
+                <p id="storageMeta" class="storage-meta">-</p>
+              </section>
+              <div id="storageDevicesList" class="storage-devices-list"></div>
+              <section class="quick-info-card">
+                <p class="section-label">Quick info</p>
+                <dl>
+                  <div><dt>Node</dt><dd id="quickInfoNode">-</dd></div>
+                  <div><dt>Status</dt><dd id="quickInfoStatus" class="online-text">● Online</dd></div>
+                  <div><dt>Root</dt><dd id="rootPath">Loading...</dd></div>
+                  <div><dt>Mode</dt><dd id="quickInfoMode">Single node</dd></div>
+                </dl>
+              </section>
             </div>
           </div>
-          <div id="dropZone" class="table-wrap">
-            <div class="drop-hint" aria-hidden="true">Drop files here to upload</div>
-            <table>
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Type</th>
-                  <th>Size</th>
-                  <th>Modified</th>
-                </tr>
-              </thead>
-              <tbody id="entriesTableBody"></tbody>
-            </table>
+
+          <div class="drawer-panel" data-panel="filesystems" hidden>
+            <section class="filesystems-card" aria-live="polite">
+              <div class="section-heading"><p class="section-label">Mounted filesystems</p><span class="section-meta">Select a mount to browse</span></div>
+              <div id="filesystemsList" class="filesystems-list"><p class="storage-meta">Loading mounts...</p></div>
+            </section>
           </div>
-        </section>
-      </main>
+
+          <div class="drawer-panel empty-panel" data-panel="recent" hidden>
+            <span class="empty-panel-icon" aria-hidden="true">◴</span><p>Recent files will appear here as you browse.</p>
+          </div>
+          <div class="drawer-panel empty-panel" data-panel="transfers" hidden>
+            <span class="empty-panel-icon" aria-hidden="true">⇅</span><p>No active transfers.</p>
+          </div>
+        </div>
+      </section>
     </div>
 
     <div id="contextMenu" class="context-menu" role="menu" aria-hidden="true">
@@ -103,8 +166,32 @@
       <button id="contextDeleteButton" class="danger" type="button" role="menuitem">Delete</button>
     </div>
 
+    <div id="addNodeModal" class="modal-backdrop" hidden>
+      <section class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="addNodeTitle">
+        <header class="modal-header">
+          <div><p class="section-label">Agent enrollment</p><h2 id="addNodeTitle">Add a Linux node</h2></div>
+          <button id="closeAddNodeButton" class="square-button" type="button" aria-label="Close">×</button>
+        </header>
+        <div class="modal-body">
+          <label class="field-label" for="enrollmentNodeName">Node name</label>
+          <input id="enrollmentNodeName" class="text-field" type="text" maxlength="80" placeholder="Example: Media server" />
+          <label class="field-label" for="enrollmentHubUrl">Hub URL reachable from the node</label>
+          <input id="enrollmentHubUrl" class="text-field" type="url" placeholder="http://100.64.0.10:3090" />
+          <button id="generateInstallCommandButton" class="primary-action modal-primary" type="button">Generate install command</button>
+          <div id="installCommandPanel" class="install-command-panel" hidden>
+            <div class="command-heading"><span>Run once on the new node</span><span id="enrollmentExpiry"></span></div>
+            <textarea id="installCommand" rows="5" readonly spellcheck="false"></textarea>
+            <button id="copyInstallCommandButton" type="button">Copy command</button>
+            <p>The code is single-use. The permanent node credential is created and stored automatically.</p>
+          </div>
+          <p id="enrollmentMessage" class="enrollment-message" role="status" aria-live="polite"></p>
+        </div>
+      </section>
+    </div>
+
     <input id="uploadInput" type="file" multiple hidden />
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script src="sort.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

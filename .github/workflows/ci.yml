@@ -20,3 +20,6 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm audit --audit-level=high
+      - run: bash -n deploy/*.sh deploy/homeassistant-addon/run.sh
+      - run: ./deploy/package-homeassistant-addon.sh
+      - run: docker build -t file-manager-homeassistant-test dist/homeassistant-addon

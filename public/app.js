@@ -1,8 +1,12 @@
 const state = {
+  activeNodeId: null,
+  nodes: [],
   rootPath: '/srv',
   currentPath: '/srv',
   sizeCache: new Map(),
   searchQuery: '',
+  sortKey: 'name',
+  sortDirection: 'asc',
   selectedPaths: new Set(),
   entries: [],
   visibleEntries: [],
@@ -12,19 +16,42 @@ const state = {
   clipboardPaths: [],
   history: [],
   historyIndex: -1,
+  nodeHealth: new Map(),
+  pageIndex: 0,
+  pageSize: 100,
 };
 
 const appBasePath = window.location.pathname.startsWith('/admin-proxy/filemanager')
   ? '/admin-proxy/filemanager'
   : '';
 const appUrl = (pathValue) => `${appBasePath}${pathValue}`;
+const nodeApiUrl = (pathValue) => {
+  if (!state.activeNodeId || !pathValue.startsWith('/api')) return appUrl(pathValue);
+  return appUrl(`/api/nodes/${encodeURIComponent(state.activeNodeId)}${pathValue.slice(4)}`);
+};
 
+const nodesCardEl = document.getElementById('nodesCard');
+const nodeButtonsEl = document.getElementById('nodeButtons');
+const nodeStatusEl = document.getElementById('nodeStatus');
+const nodeCountEl = document.getElementById('nodeCount');
+const quickInfoNodeEl = document.getElementById('quickInfoNode');
+const quickInfoStatusEl = document.getElementById('quickInfoStatus');
+const quickInfoModeEl = document.getElementById('quickInfoMode');
 const rootPathEl = document.getElementById('rootPath');
 const storageSummaryEl = document.getElementById('storageSummary');
 const storageBarUsedEl = document.getElementById('storageBarUsed');
 const storageBarFreeEl = document.getElementById('storageBarFree');
 const storageMetaEl = document.getElementById('storageMeta');
+const storageDevicesListEl = document.getElementById('storageDevicesList');
+const filesystemsListEl = document.getElementById('filesystemsList');
 const entriesTableBodyEl = document.getElementById('entriesTableBody');
+const footerItemCountEl = document.getElementById('footerItemCount');
+const footerSelectionCountEl = document.getElementById('footerSelectionCount');
+const paginationSummaryEl = document.getElementById('paginationSummary');
+const previousPageButtonEl = document.getElementById('previousPageButton');
+const currentPageButtonEl = document.getElementById('currentPageButton');
+const nextPageButtonEl = document.getElementById('nextPageButton');
+const sortButtons = [...document.querySelectorAll('.sort-button')];
 const breadcrumbsEl = document.getElementById('breadcrumbs');
 const searchInputEl = document.getElementById('searchInput');
 const toastEl = document.getElementById('toast');
@@ -34,13 +61,6 @@ const newFolderButtonEl = document.getElementById('newFolderButton');
 const uploadInputEl = document.getElementById('uploadInput');
 const dropZoneEl = document.getElementById('dropZone');
 const refreshButtonEl = document.getElementById('refreshButton');
-const selectionActionsEl = document.getElementById('selectionActions');
-const selectionCountEl = document.getElementById('selectionCount');
-const topCopyButtonEl = document.getElementById('topCopyButton');
-const topRenameButtonEl = document.getElementById('topRenameButton');
-const topPasteButtonEl = document.getElementById('topPasteButton');
-const topDownloadButtonEl = document.getElementById('topDownloadButton');
-const topDeleteButtonEl = document.getElementById('topDeleteButton');
 const contextMenuEl = document.getElementById('contextMenu');
 const contextUploadButtonEl = document.getElementById('contextUploadButton');
 const contextCopyButtonEl = document.getElementById('contextCopyButton');
@@ -48,6 +68,22 @@ const contextRenameButtonEl = document.getElementById('contextRenameButton');
 const contextPasteButtonEl = document.getElementById('contextPasteButton');
 const contextDownloadButtonEl = document.getElementById('contextDownloadButton');
 const contextDeleteButtonEl = document.getElementById('contextDeleteButton');
+const detailsDrawerEl = document.getElementById('detailsDrawer');
+const drawerToggleEl = document.getElementById('drawerToggle');
+const drawerTabs = [...document.querySelectorAll('.drawer-tab')];
+const drawerPanels = [...document.querySelectorAll('.drawer-panel')];
+const addNodeButtonEl = document.getElementById('addNodeButton');
+const addNodeModalEl = document.getElementById('addNodeModal');
+const closeAddNodeButtonEl = document.getElementById('closeAddNodeButton');
+const enrollmentNodeNameEl = document.getElementById('enrollmentNodeName');
+const enrollmentHubUrlEl = document.getElementById('enrollmentHubUrl');
+const generateInstallCommandButtonEl = document.getElementById('generateInstallCommandButton');
+const installCommandPanelEl = document.getElementById('installCommandPanel');
+const installCommandEl = document.getElementById('installCommand');
+const copyInstallCommandButtonEl = document.getElementById('copyInstallCommandButton');
+const enrollmentExpiryEl = document.getElementById('enrollmentExpiry');
+const enrollmentMessageEl = document.getElementById('enrollmentMessage');
+let enrollmentPollTimer = null;
 
 function showToast(message, duration = 2200) {
   toastEl.textContent = message;
@@ -76,8 +112,17 @@ function formatPercent(value) {
   return `${value.toFixed(1)}%`;
 }
 
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}
+
 async function apiGet(url) {
-  const response = await fetch(appUrl(url));
+  const response = await fetch(nodeApiUrl(url));
   if (!response.ok) {
     const errorBody = await response.json().catch(() => ({}));
     throw new Error(errorBody.error || `Request failed: ${response.status}`);
@@ -86,7 +131,7 @@ async function apiGet(url) {
 }
 
 async function apiSend(url, method, body) {
-  const response = await fetch(appUrl(url), {
+  const response = await fetch(nodeApiUrl(url), {
     method,
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -100,6 +145,180 @@ async function apiSend(url, method, body) {
   return response.json().catch(() => ({}));
 }
 
+function setNodeStatus(message, status = '') {
+  nodeStatusEl.textContent = message;
+  nodeStatusEl.className = `node-status ${status}`.trim();
+  if (state.activeNodeId && status) {
+    state.nodeHealth.set(state.activeNodeId, status);
+    renderNodeButtons();
+  }
+  quickInfoStatusEl.textContent = status === 'offline'
+    ? '● Offline'
+    : status === 'connecting'
+      ? '● Connecting'
+      : '● Online';
+  quickInfoStatusEl.className = status === 'offline'
+    ? 'offline-text'
+    : status === 'connecting'
+      ? 'connecting-text'
+      : 'online-text';
+}
+
+function renderNodeButtons() {
+  nodeButtonsEl.innerHTML = '';
+  for (const node of state.nodes) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'node-button';
+    button.classList.toggle('active', node.id === state.activeNodeId);
+    const health = state.nodeHealth.get(node.id) || 'available';
+    const icon = document.createElement('span');
+    icon.className = 'node-icon';
+    icon.setAttribute('aria-hidden', 'true');
+    const copy = document.createElement('span');
+    copy.className = 'node-copy';
+    const name = document.createElement('span');
+    name.className = 'node-name';
+    name.textContent = node.name;
+    const status = document.createElement('span');
+    status.className = `node-health ${health}`;
+    const dot = document.createElement('span');
+    dot.className = 'health-dot';
+    const statusText = document.createTextNode(
+      health === 'online' ? 'Online' : health === 'offline' ? 'Offline' : health === 'connecting' ? 'Connecting' : 'Available'
+    );
+    status.append(dot, statusText);
+    copy.append(name, status);
+    const chevron = document.createElement('span');
+    chevron.className = 'node-chevron';
+    chevron.setAttribute('aria-hidden', 'true');
+    chevron.textContent = '›';
+    button.append(icon, copy, chevron);
+    button.addEventListener('click', () => void selectNode(node.id));
+    nodeButtonsEl.appendChild(button);
+  }
+  nodeCountEl.textContent = `${state.nodes.length} configured`;
+}
+
+async function loadNodes() {
+  const response = await fetch(appUrl('/api/nodes'));
+  if (response.status === 404) return false;
+  if (!response.ok) {
+    const errorBody = await response.json().catch(() => ({}));
+    throw new Error(errorBody.error || `Unable to load nodes: ${response.status}`);
+  }
+  const data = await response.json();
+  state.nodes = Array.isArray(data.nodes) ? data.nodes : [];
+  nodesCardEl.hidden = false;
+  quickInfoModeEl.textContent = 'Hub + agents';
+  renderNodeButtons();
+  if (state.nodes.length === 0) setNodeStatus('Add your first node');
+  return true;
+}
+
+function setEnrollmentMessage(message, status = '') {
+  enrollmentMessageEl.textContent = message;
+  enrollmentMessageEl.className = `enrollment-message ${status}`.trim();
+}
+
+function stopEnrollmentPolling() {
+  if (enrollmentPollTimer) window.clearInterval(enrollmentPollTimer);
+  enrollmentPollTimer = null;
+}
+
+async function openAddNodeModal() {
+  addNodeModalEl.hidden = false;
+  installCommandPanelEl.hidden = true;
+  installCommandEl.value = '';
+  setEnrollmentMessage('');
+  enrollmentNodeNameEl.value = '';
+  try {
+    const response = await fetch(appUrl('/api/enrollment-info'));
+    if (!response.ok) throw new Error('Enrollment is unavailable on this hub.');
+    const info = await response.json();
+    enrollmentHubUrlEl.value = info.hubUrl || window.location.origin;
+    enrollmentNodeNameEl.focus();
+  } catch (error) {
+    enrollmentHubUrlEl.value = window.location.origin;
+    setEnrollmentMessage(error.message, 'error');
+  }
+}
+
+function closeAddNodeModal() {
+  addNodeModalEl.hidden = true;
+  stopEnrollmentPolling();
+  addNodeButtonEl.focus();
+}
+
+async function generateInstallCommand() {
+  const name = enrollmentNodeNameEl.value.trim();
+  const hubUrl = enrollmentHubUrlEl.value.trim();
+  if (!name || !hubUrl) {
+    setEnrollmentMessage('Enter a node name and reachable hub URL.', 'error');
+    return;
+  }
+
+  generateInstallCommandButtonEl.disabled = true;
+  setEnrollmentMessage('Generating a single-use enrollment code...');
+  try {
+    const response = await fetch(appUrl('/api/enrollment-tokens'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, hubUrl }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `Unable to create enrollment code: ${response.status}`);
+    installCommandEl.value = data.command;
+    installCommandPanelEl.hidden = false;
+    enrollmentExpiryEl.textContent = `Expires ${new Date(data.expiresAt).toLocaleTimeString()}`;
+    setEnrollmentMessage('Run the command on the new node. This list will update when enrollment completes.');
+    const startingNodeIds = new Set(state.nodes.map((node) => node.id));
+    stopEnrollmentPolling();
+    enrollmentPollTimer = window.setInterval(async () => {
+      try {
+        await loadNodes();
+        const enrolledNode = state.nodes.find((node) => !startingNodeIds.has(node.id));
+        if (enrolledNode) {
+          stopEnrollmentPolling();
+          setEnrollmentMessage(`${enrolledNode.name} enrolled successfully.`, 'success');
+        }
+      } catch {
+        // The next poll retries while the hub or node is temporarily unavailable.
+      }
+    }, 3000);
+  } catch (error) {
+    setEnrollmentMessage(error.message, 'error');
+  } finally {
+    generateInstallCommandButtonEl.disabled = false;
+  }
+}
+
+async function selectNode(nodeId) {
+  const node = state.nodes.find((candidate) => candidate.id === nodeId);
+  if (!node) return;
+
+  state.activeNodeId = node.id;
+  state.history = [];
+  state.historyIndex = -1;
+  state.sizeCache.clear();
+  state.clipboardPaths = [];
+  state.entries = [];
+  clearSelection();
+  quickInfoNodeEl.textContent = node.name;
+  renderNodeButtons();
+  setNodeStatus(`Connecting to ${node.name}...`, 'connecting');
+
+  try {
+    await loadConfig();
+    await loadFilesystems();
+    await loadDirectory(state.currentPath);
+    setNodeStatus(`${node.name} online`, 'online');
+  } catch (error) {
+    setNodeStatus(`${node.name} unavailable`, 'offline');
+    showToast(error.message);
+  }
+}
+
 async function loadConfig() {
   const config = await apiGet('/api/config');
   state.rootPath = config.rootPath;
@@ -107,25 +326,151 @@ async function loadConfig() {
   rootPathEl.textContent = config.rootPath;
 }
 
-async function loadStorage() {
+async function loadFilesystems() {
   try {
-    const storage = await apiGet('/api/storage');
-    const total = Number(storage.totalBytes || 0);
-    const free = Number(storage.freeBytes ?? storage.availableBytes ?? 0);
-    const available = Number(storage.availableBytes ?? free);
-    const used = Number(storage.usedBytes || 0);
+    const data = await apiGet('/api/filesystems');
+    const filesystems = Array.isArray(data.filesystems) ? data.filesystems : [];
+    const localSummary = data.localSummary || filesystems
+      .filter((filesystem) => !filesystem.network && !['cifs', 'nfs', 'nfs4'].includes(filesystem.type))
+      .filter((filesystem, index, all) => all.findIndex((candidate) =>
+        (candidate.source || candidate.mountPath) === (filesystem.source || filesystem.mountPath)) === index)
+      .reduce((summary, filesystem) => ({
+        filesystemCount: summary.filesystemCount + 1,
+        totalBytes: summary.totalBytes + Number(filesystem.totalBytes || 0),
+        usedBytes: summary.usedBytes + Number(filesystem.usedBytes || 0),
+        freeBytes: summary.freeBytes + Number(filesystem.freeBytes || 0),
+        availableBytes: summary.availableBytes + Number(filesystem.availableBytes || 0),
+      }), { filesystemCount: 0, totalBytes: 0, usedBytes: 0, freeBytes: 0, availableBytes: 0 });
+    const total = Number(localSummary.totalBytes || 0);
+    const free = Number(localSummary.freeBytes || 0);
+    const available = Number(localSummary.availableBytes || 0);
+    const used = Number(localSummary.usedBytes || 0);
     const usedPercent = total > 0 ? Math.min(100, Math.max(0, (used / total) * 100)) : 0;
     const freePercent = total > 0 ? Math.min(100, Math.max(0, (free / total) * 100)) : 0;
 
     storageSummaryEl.textContent = `${formatBytes(free)} free of ${formatBytes(total)}`;
     storageBarUsedEl.style.width = `${usedPercent}%`;
     storageBarFreeEl.style.width = `${freePercent}%`;
-    storageMetaEl.textContent = `${formatPercent(usedPercent)} used • ${formatBytes(free)} free • ${formatBytes(available)} available to non-root`;
+    storageMetaEl.textContent = `${formatPercent(usedPercent)} used • ${localSummary.filesystemCount} local filesystem(s) • network mounts excluded`;
+    const localDevices = Array.isArray(data.localDevices) ? data.localDevices : buildLocalDeviceSummaries(filesystems);
+    renderStorageDevices(localDevices);
+    filesystemsListEl.innerHTML = '';
+
+    if (filesystems.length === 0) {
+      filesystemsListEl.innerHTML = '<p class="storage-meta">No persistent mounts discovered.</p>';
+      return;
+    }
+
+    for (const filesystem of filesystems) {
+      const total = Number(filesystem.totalBytes || 0);
+      const free = Number(filesystem.freeBytes || 0);
+      const used = Number(filesystem.usedBytes || 0);
+      const usedPercent = total > 0 ? Math.min(100, Math.max(0, (used / total) * 100)) : 0;
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'filesystem-button';
+
+      const heading = document.createElement('span');
+      heading.className = 'filesystem-heading';
+      heading.textContent = filesystem.mountPath;
+      const source = document.createElement('span');
+      source.className = 'filesystem-source';
+      source.textContent = `${filesystem.source} • ${filesystem.type}${filesystem.writable ? ' • rw' : ' • ro'}`;
+      const usage = document.createElement('span');
+      usage.className = 'filesystem-usage';
+      usage.textContent = `${formatBytes(free)} free of ${formatBytes(total)} • ${formatPercent(usedPercent)} used`;
+
+      button.append(heading, source, usage);
+      button.addEventListener('click', () => void navigateTo(filesystem.mountPath));
+      filesystemsListEl.appendChild(button);
+    }
   } catch (error) {
     storageSummaryEl.textContent = 'Disk usage unavailable';
     storageBarUsedEl.style.width = '0%';
     storageBarFreeEl.style.width = '100%';
     storageMetaEl.textContent = error.message;
+    storageDevicesListEl.innerHTML = '';
+    filesystemsListEl.innerHTML = '';
+    const message = document.createElement('p');
+    message.className = 'storage-meta';
+    message.textContent = `Mount discovery unavailable: ${error.message}`;
+    filesystemsListEl.appendChild(message);
+  }
+}
+
+function storageDeviceSource(source) {
+  const value = String(source || '').trim();
+  if (/^\/dev\/(nvme\d+n\d+|mmcblk\d+|md\d+)p\d+$/.test(value)) return value.replace(/p\d+$/, '');
+  if (/^\/dev\/(sd|vd|xvd|hd)[a-z]+\d+$/.test(value)) return value.replace(/\d+$/, '');
+  return value;
+}
+
+function buildLocalDeviceSummaries(filesystems) {
+  const devices = new Map();
+  const seenSources = new Set();
+  for (const filesystem of filesystems) {
+    if (filesystem.network || ['cifs', 'nfs', 'nfs4'].includes(filesystem.type)) continue;
+    const source = filesystem.source || filesystem.mountPath;
+    if (!source || seenSources.has(source)) continue;
+    seenSources.add(source);
+    const device = storageDeviceSource(source) || source;
+    const summary = devices.get(device) || {
+      device,
+      primary: false,
+      filesystemCount: 0,
+      mountPaths: [],
+      totalBytes: 0,
+      usedBytes: 0,
+      freeBytes: 0,
+    };
+    summary.primary ||= filesystem.mountPath === state.rootPath;
+    summary.filesystemCount += 1;
+    summary.mountPaths.push(filesystem.mountPath);
+    summary.totalBytes += Number(filesystem.totalBytes || 0);
+    summary.usedBytes += Number(filesystem.usedBytes || 0);
+    summary.freeBytes += Number(filesystem.freeBytes || 0);
+    devices.set(device, summary);
+  }
+  return [...devices.values()].sort((a, b) => Number(b.primary) - Number(a.primary) || a.device.localeCompare(b.device));
+}
+
+function renderStorageDevices(devices) {
+  storageDevicesListEl.innerHTML = '';
+  for (const device of devices) {
+    const total = Number(device.totalBytes || 0);
+    const used = Number(device.usedBytes || 0);
+    const free = Number(device.freeBytes || 0);
+    const usedPercent = total > 0 ? Math.min(100, Math.max(0, (used / total) * 100)) : 0;
+    const card = document.createElement('div');
+    card.className = 'storage-device';
+
+    const heading = document.createElement('div');
+    heading.className = 'storage-device-heading';
+    const title = document.createElement('strong');
+    title.textContent = `${device.primary ? 'System ' : ''}${device.mediaType || 'disk'}`;
+    const source = document.createElement('span');
+    source.textContent = device.device;
+    heading.append(title, source);
+
+    const usage = document.createElement('p');
+    usage.className = 'storage-device-usage';
+    usage.textContent = `${formatBytes(free)} free of ${formatBytes(total)} • ${formatPercent(usedPercent)} used`;
+    const meter = document.createElement('div');
+    meter.className = 'storage-device-meter';
+    meter.setAttribute('role', 'progressbar');
+    meter.setAttribute('aria-label', `${title.textContent} usage`);
+    meter.setAttribute('aria-valuenow', usedPercent.toFixed(1));
+    meter.setAttribute('aria-valuemin', '0');
+    meter.setAttribute('aria-valuemax', '100');
+    const usedBar = document.createElement('span');
+    usedBar.style.width = `${usedPercent}%`;
+    meter.appendChild(usedBar);
+
+    const mounts = document.createElement('p');
+    mounts.className = 'storage-device-mounts';
+    mounts.textContent = device.mountPaths.join(' • ');
+    card.append(heading, usage, meter, mounts);
+    storageDevicesListEl.appendChild(card);
   }
 }
 
@@ -142,7 +487,9 @@ function clearSelection() {
 
 function syncSelectedRows() {
   for (const [pathValue, row] of state.rowByPath.entries()) {
-    row.classList.toggle('selected', state.selectedPaths.has(pathValue));
+    const selected = state.selectedPaths.has(pathValue);
+    row.classList.toggle('selected', selected);
+    row.setAttribute('aria-selected', String(selected));
   }
   updateActionControls();
 }
@@ -219,15 +566,7 @@ function setContextMenuState() {
 function updateActionControls() {
   const hasSelection = state.selectedPaths.size > 0;
   const hasClipboard = state.clipboardPaths.length > 0;
-  selectionActionsEl.classList.toggle('show', hasSelection);
-  selectionActionsEl.setAttribute('aria-hidden', String(!hasSelection));
-  selectionCountEl.textContent = `${state.selectedPaths.size} selected`;
-
-  topCopyButtonEl.disabled = !hasSelection;
-  topRenameButtonEl.disabled = state.selectedPaths.size !== 1;
-  topDownloadButtonEl.disabled = !hasSelection;
-  topDeleteButtonEl.disabled = !hasSelection;
-  topPasteButtonEl.disabled = !hasClipboard;
+  footerSelectionCountEl.textContent = `${state.selectedPaths.size} selected`;
 
   contextCopyButtonEl.disabled = !hasSelection;
   contextRenameButtonEl.disabled = state.selectedPaths.size !== 1;
@@ -275,16 +614,6 @@ function pushHistory(pathValue) {
   updateBackButton();
 }
 
-async function getEntrySize(pathValue) {
-  if (state.sizeCache.has(pathValue)) {
-    return state.sizeCache.get(pathValue);
-  }
-
-  const sizeInfo = await apiGet(`/api/size?path=${encodeURIComponent(pathValue)}`);
-  state.sizeCache.set(pathValue, sizeInfo.size);
-  return sizeInfo.size;
-}
-
 function getFilteredEntries() {
   const query = state.searchQuery.trim().toLowerCase();
   if (!query) {
@@ -297,29 +626,15 @@ function getFilteredEntries() {
   });
 }
 
-async function revealSize(entry, sizeCell) {
-  if (entry.type === 'file') {
-    sizeCell.textContent = formatBytes(entry.size);
-    return;
-  }
-
-  sizeCell.textContent = 'Calculating...';
-  try {
-    const dirSize = await getEntrySize(entry.path);
-    sizeCell.textContent = formatBytes(dirSize);
-  } catch (error) {
-    sizeCell.textContent = 'Unavailable';
-    showToast(error.message);
-  }
-}
-
 function openEntry(entry) {
   if (entry.type === 'directory') {
     void navigateTo(entry.path);
     return;
   }
 
-  window.location.href = appUrl(`/viewer.html?path=${encodeURIComponent(entry.path)}`);
+  const query = new URLSearchParams({ path: entry.path });
+  if (state.activeNodeId) query.set('node', state.activeNodeId);
+  window.location.href = appUrl(`/viewer.html?${query.toString()}`);
 }
 
 async function animateAndOpenEntry(entry, row) {
@@ -349,7 +664,10 @@ function renderEntries(entries) {
   for (const entry of entries) {
     const row = document.createElement('tr');
     row.className = 'entry-row';
+    row.setAttribute('aria-selected', 'false');
     const [label, className] = fileIcon(entry.type);
+    const safeName = escapeHtml(entry.name);
+    const safeType = escapeHtml(entry.type);
     const cachedSize = state.sizeCache.get(entry.path);
     const sizeLabel =
       entry.type === 'file' ? formatBytes(entry.size) : cachedSize != null ? formatBytes(cachedSize) : 'Click to load';
@@ -358,20 +676,17 @@ function renderEntries(entries) {
       <td>
         <div class="file-name">
           <span class="file-icon ${className}">${label}</span>
-          <span>${entry.name}</span>
+          <span>${safeName}</span>
         </div>
       </td>
-      <td>${entry.type}</td>
+      <td>${safeType}</td>
       <td class="size-cell">${sizeLabel}</td>
-      <td>${formatDate(entry.modifiedAt)}</td>
+      <td>${escapeHtml(formatDate(entry.modifiedAt))}</td>
     `;
-
-    const sizeCell = row.querySelector('.size-cell');
 
     row.addEventListener('click', (event) => {
       hideContextMenu();
       selectFromClick(entry.path, event);
-      void revealSize(entry, sizeCell);
     });
 
     row.addEventListener('mousedown', (event) => {
@@ -401,7 +716,52 @@ function renderEntries(entries) {
 }
 
 function renderCurrentView() {
-  renderEntries(getFilteredEntries());
+  const filteredEntries = FileManagerSort.sortEntries(
+    getFilteredEntries(),
+    state.sortKey,
+    state.sortDirection,
+    state.sizeCache
+  );
+  const pageCount = Math.max(1, Math.ceil(filteredEntries.length / state.pageSize));
+  state.pageIndex = Math.min(state.pageIndex, pageCount - 1);
+  const pageStart = state.pageIndex * state.pageSize;
+  const pageEntries = filteredEntries.slice(pageStart, pageStart + state.pageSize);
+  renderEntries(pageEntries);
+  footerItemCountEl.textContent = `${filteredEntries.length} item${filteredEntries.length === 1 ? '' : 's'}`;
+  paginationSummaryEl.textContent = filteredEntries.length === 0
+    ? 'Showing 0 items'
+    : `Showing ${pageStart + 1}–${pageStart + pageEntries.length} of ${filteredEntries.length}`;
+  currentPageButtonEl.textContent = String(state.pageIndex + 1);
+  previousPageButtonEl.disabled = state.pageIndex === 0;
+  nextPageButtonEl.disabled = state.pageIndex >= pageCount - 1;
+  updateSortHeaders();
+}
+
+function updateSortHeaders() {
+  for (const button of sortButtons) {
+    const key = button.dataset.sortKey;
+    const active = key === state.sortKey;
+    const header = button.closest('th');
+    button.classList.toggle('active', active);
+    button.querySelector('.sort-indicator').textContent = active
+      ? state.sortDirection === 'asc' ? '↑' : '↓'
+      : '↕';
+    header.setAttribute('aria-sort', active
+      ? state.sortDirection === 'asc' ? 'ascending' : 'descending'
+      : 'none');
+  }
+}
+
+function setSort(sortKey) {
+  if (state.sortKey === sortKey) {
+    state.sortDirection = state.sortDirection === 'asc' ? 'desc' : 'asc';
+  } else {
+    state.sortKey = sortKey;
+    state.sortDirection = 'asc';
+  }
+  state.pageIndex = 0;
+  clearSelection();
+  renderCurrentView();
 }
 
 function renderBreadcrumb(pathValue) {
@@ -438,6 +798,7 @@ async function loadDirectory(pathValue, options = {}) {
   renderBreadcrumb(data.path);
   clearSelection();
   state.entries = data.entries;
+  state.pageIndex = 0;
   renderCurrentView();
 
   if (recordHistory) {
@@ -485,7 +846,7 @@ async function downloadSelected() {
   if (selected.length === 0) return;
 
   try {
-    const response = await fetch(appUrl('/api/bulk-download'), {
+    const response = await fetch(nodeApiUrl('/api/bulk-download'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ paths: selected }),
@@ -578,7 +939,7 @@ async function uploadFiles(fileList) {
   }
 
   try {
-    const response = await fetch(appUrl(`/api/upload?path=${encodeURIComponent(state.currentPath)}`), {
+    const response = await fetch(nodeApiUrl(`/api/upload?path=${encodeURIComponent(state.currentPath)}`), {
       method: 'POST',
       body: formData,
     });
@@ -593,7 +954,7 @@ async function uploadFiles(fileList) {
     showToast(`Uploaded ${uploadedCount} item(s)`);
     state.sizeCache.clear();
     await loadDirectory(state.currentPath, { recordHistory: false });
-    await loadStorage();
+    await loadFilesystems();
   } catch (error) {
     showToast(error.message);
   }
@@ -619,7 +980,7 @@ backButtonEl.addEventListener('click', async () => {
 refreshButtonEl.addEventListener('click', async () => {
   hideContextMenu();
   await loadDirectory(state.currentPath, { recordHistory: false });
-  await loadStorage();
+  await loadFilesystems();
   showToast('Refreshed');
 });
 
@@ -628,7 +989,6 @@ uploadButtonEl.addEventListener('click', () => {
 });
 
 newFolderButtonEl.addEventListener('click', () => void createFolder());
-topRenameButtonEl.addEventListener('click', () => void renameSelected());
 contextRenameButtonEl.addEventListener('click', () => {
   hideContextMenu();
   void renameSelected();
@@ -659,6 +1019,24 @@ dropZoneEl.addEventListener('drop', (event) => {
 
 searchInputEl.addEventListener('input', () => {
   state.searchQuery = searchInputEl.value;
+  state.pageIndex = 0;
+  clearSelection();
+  renderCurrentView();
+});
+
+for (const button of sortButtons) {
+  button.addEventListener('click', () => setSort(button.dataset.sortKey));
+}
+
+previousPageButtonEl.addEventListener('click', () => {
+  if (state.pageIndex === 0) return;
+  state.pageIndex -= 1;
+  clearSelection();
+  renderCurrentView();
+});
+
+nextPageButtonEl.addEventListener('click', () => {
+  state.pageIndex += 1;
   clearSelection();
   renderCurrentView();
 });
@@ -685,8 +1063,7 @@ document.addEventListener('click', (event) => {
   const target = event.target;
   if (
     target.closest('.entry-row') ||
-    target.closest('#contextMenu') ||
-    target.closest('#selectionActions')
+    target.closest('#contextMenu')
   ) {
     return;
   }
@@ -713,6 +1090,7 @@ document.addEventListener('keydown', (event) => {
   }
 
   if (event.key === 'Escape') {
+    if (!addNodeModalEl.hidden) closeAddNodeModal();
     hideContextMenu();
     return;
   }
@@ -776,30 +1154,59 @@ contextDeleteButtonEl.addEventListener('click', async () => {
   await deleteSelected();
 });
 
-topCopyButtonEl.addEventListener('click', async () => {
-  hideContextMenu();
-  copySelected();
+for (const tab of drawerTabs) {
+  tab.addEventListener('click', () => {
+    const target = tab.dataset.tab;
+    for (const candidate of drawerTabs) {
+      const active = candidate === tab;
+      candidate.classList.toggle('active', active);
+      candidate.setAttribute('aria-selected', String(active));
+    }
+    for (const panel of drawerPanels) {
+      const active = panel.dataset.panel === target;
+      panel.classList.toggle('active', active);
+      panel.hidden = !active;
+    }
+    detailsDrawerEl.dataset.collapsed = 'false';
+    drawerToggleEl.setAttribute('aria-expanded', 'true');
+    drawerToggleEl.querySelector('span:first-child').textContent = 'Collapse';
+  });
+}
+
+drawerToggleEl.addEventListener('click', () => {
+  const collapsed = detailsDrawerEl.dataset.collapsed === 'true';
+  detailsDrawerEl.dataset.collapsed = String(!collapsed);
+  drawerToggleEl.setAttribute('aria-expanded', String(collapsed));
+  drawerToggleEl.querySelector('span:first-child').textContent = collapsed ? 'Collapse' : 'Expand';
 });
 
-topPasteButtonEl.addEventListener('click', async () => {
-  hideContextMenu();
-  await pasteClipboard();
+addNodeButtonEl.addEventListener('click', () => void openAddNodeModal());
+closeAddNodeButtonEl.addEventListener('click', closeAddNodeModal);
+addNodeModalEl.addEventListener('click', (event) => {
+  if (event.target === addNodeModalEl) closeAddNodeModal();
 });
-
-topDownloadButtonEl.addEventListener('click', async () => {
-  hideContextMenu();
-  await downloadSelected();
-});
-
-topDeleteButtonEl.addEventListener('click', async () => {
-  hideContextMenu();
-  await deleteSelected();
+generateInstallCommandButtonEl.addEventListener('click', () => void generateInstallCommand());
+copyInstallCommandButtonEl.addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(installCommandEl.value);
+    setEnrollmentMessage('Install command copied.', 'success');
+  } catch {
+    installCommandEl.select();
+    setEnrollmentMessage('Select and copy the command manually.', 'error');
+  }
 });
 
 (async function initialize() {
   try {
+    const distributed = await loadNodes();
+    if (distributed) {
+      if (state.nodes.length > 0) await selectNode(state.nodes[0].id);
+      return;
+    }
+    quickInfoNodeEl.textContent = 'Local node';
+    quickInfoModeEl.textContent = 'Single node';
     await loadConfig();
-    await loadStorage();
+    await loadFilesystems();
     await loadDirectory(state.currentPath);
   } catch (error) {
     showToast(`Initialization failed: ${error.message}`);

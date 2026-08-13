@@ -1,0 +1,16 @@
+{
+  "nodes": [
+    {
+      "id": "server-one",
+      "name": "Server One",
+      "url": "http://100.64.0.10:3091",
+      "tokenFile": "/run/file-manager/secrets/server-one.token"
+    },
+    {
+      "id": "nas",
+      "name": "NAS",
+      "url": "http://100.64.0.11:3091",
+      "tokenFile": "/run/file-manager/secrets/nas.token"
+    }
+  ]
+}

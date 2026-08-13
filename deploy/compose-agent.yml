@@ -1,0 +1,16 @@
+services:
+  agent:
+    build: ..
+    container_name: file-manager-agent
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      PORT: ${AGENT_PORT:-3091}
+      FILEMANAGER_LISTEN_HOST: ${PRIVATE_IP:?Set PRIVATE_IP to this node's private-network address}
+      FILEMANAGER_MODE: agent
+      FILEMANAGER_ROOT: /host
+      FILEMANAGER_DISPLAY_ROOT: /
+      FILEMANAGER_AGENT_TOKEN_FILE: /run/secrets/agent-token
+    volumes:
+      - /:/host:rw,rslave
+      - ${AGENT_TOKEN_FILE:?Set AGENT_TOKEN_FILE to an absolute path}:/run/secrets/agent-token:ro
