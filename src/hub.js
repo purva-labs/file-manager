@@ -92,12 +92,27 @@ function verifyAgent(nodeUrl, token) {
       headers: { authorization: `Bearer ${token}` },
       timeout: 10000,
     }, (response) => {
-      response.resume();
-      if (response.statusCode === 200) {
-        resolve();
-      } else {
-        reject(new Error(`Agent verification returned HTTP ${response.statusCode}.`));
-      }
+      let body = '';
+      response.setEncoding('utf8');
+      response.on('data', (chunk) => {
+        body += chunk;
+        if (body.length > 8192) request.destroy(new Error('Agent verification response is too large.'));
+      });
+      response.on('end', () => {
+        if (response.statusCode !== 200) {
+          reject(new Error(`Agent verification returned HTTP ${response.statusCode}.`));
+          return;
+        }
+        try {
+          const config = JSON.parse(body);
+          if (typeof config.rootPath !== 'string' || !config.rootPath.startsWith('/')) {
+            throw new Error('Agent returned an invalid root path.');
+          }
+          resolve();
+        } catch (error) {
+          reject(new Error(`Agent verification failed: ${error.message}`));
+        }
+      });
     });
     request.on('timeout', () => request.destroy(new Error('Agent verification timed out.')));
     request.on('error', reject);
