@@ -45,7 +45,6 @@ const storageMetaEl = document.getElementById('storageMeta');
 const storageDevicesListEl = document.getElementById('storageDevicesList');
 const filesystemsListEl = document.getElementById('filesystemsList');
 const entriesTableBodyEl = document.getElementById('entriesTableBody');
-const selectAllCheckboxEl = document.getElementById('selectAllCheckbox');
 const footerItemCountEl = document.getElementById('footerItemCount');
 const footerSelectionCountEl = document.getElementById('footerSelectionCount');
 const paginationSummaryEl = document.getElementById('paginationSummary');
@@ -62,13 +61,6 @@ const newFolderButtonEl = document.getElementById('newFolderButton');
 const uploadInputEl = document.getElementById('uploadInput');
 const dropZoneEl = document.getElementById('dropZone');
 const refreshButtonEl = document.getElementById('refreshButton');
-const selectionActionsEl = document.getElementById('selectionActions');
-const selectionCountEl = document.getElementById('selectionCount');
-const topCopyButtonEl = document.getElementById('topCopyButton');
-const topRenameButtonEl = document.getElementById('topRenameButton');
-const topPasteButtonEl = document.getElementById('topPasteButton');
-const topDownloadButtonEl = document.getElementById('topDownloadButton');
-const topDeleteButtonEl = document.getElementById('topDeleteButton');
 const contextMenuEl = document.getElementById('contextMenu');
 const contextUploadButtonEl = document.getElementById('contextUploadButton');
 const contextCopyButtonEl = document.getElementById('contextCopyButton');
@@ -497,12 +489,8 @@ function syncSelectedRows() {
   for (const [pathValue, row] of state.rowByPath.entries()) {
     const selected = state.selectedPaths.has(pathValue);
     row.classList.toggle('selected', selected);
-    const checkbox = row.querySelector('.row-checkbox');
-    if (checkbox) checkbox.checked = selected;
+    row.setAttribute('aria-selected', String(selected));
   }
-  const visiblePaths = state.visibleEntries.map((entry) => entry.path);
-  selectAllCheckboxEl.checked = visiblePaths.length > 0 && visiblePaths.every((pathValue) => state.selectedPaths.has(pathValue));
-  selectAllCheckboxEl.indeterminate = !selectAllCheckboxEl.checked && visiblePaths.some((pathValue) => state.selectedPaths.has(pathValue));
   updateActionControls();
 }
 
@@ -578,16 +566,7 @@ function setContextMenuState() {
 function updateActionControls() {
   const hasSelection = state.selectedPaths.size > 0;
   const hasClipboard = state.clipboardPaths.length > 0;
-  selectionActionsEl.classList.toggle('show', hasSelection);
-  selectionActionsEl.setAttribute('aria-hidden', String(!hasSelection));
-  selectionCountEl.textContent = `${state.selectedPaths.size} selected`;
   footerSelectionCountEl.textContent = `${state.selectedPaths.size} selected`;
-
-  topCopyButtonEl.disabled = !hasSelection;
-  topRenameButtonEl.disabled = state.selectedPaths.size !== 1;
-  topDownloadButtonEl.disabled = !hasSelection;
-  topDeleteButtonEl.disabled = !hasSelection;
-  topPasteButtonEl.disabled = !hasClipboard;
 
   contextCopyButtonEl.disabled = !hasSelection;
   contextRenameButtonEl.disabled = state.selectedPaths.size !== 1;
@@ -675,7 +654,7 @@ function renderEntries(entries) {
     const row = document.createElement('tr');
     row.className = 'empty-row';
     row.innerHTML = `
-      <td colspan="6">${state.searchQuery.trim() ? 'No matches found.' : 'This folder is empty.'}</td>
+      <td colspan="4">${state.searchQuery.trim() ? 'No matches found.' : 'This folder is empty.'}</td>
     `;
     entriesTableBodyEl.appendChild(row);
     syncSelectedRows();
@@ -685,6 +664,7 @@ function renderEntries(entries) {
   for (const entry of entries) {
     const row = document.createElement('tr');
     row.className = 'entry-row';
+    row.setAttribute('aria-selected', 'false');
     const [label, className] = fileIcon(entry.type);
     const safeName = escapeHtml(entry.name);
     const safeType = escapeHtml(entry.type);
@@ -693,9 +673,6 @@ function renderEntries(entries) {
       entry.type === 'file' ? formatBytes(entry.size) : cachedSize != null ? formatBytes(cachedSize) : 'Click to load';
 
     row.innerHTML = `
-      <td class="select-column">
-        <input class="row-checkbox" type="checkbox" aria-label="Select ${safeName}">
-      </td>
       <td>
         <div class="file-name">
           <span class="file-icon ${className}">${label}</span>
@@ -705,23 +682,7 @@ function renderEntries(entries) {
       <td>${safeType}</td>
       <td class="size-cell">${sizeLabel}</td>
       <td>${escapeHtml(formatDate(entry.modifiedAt))}</td>
-      <td class="more-column"><button class="row-more-button" type="button" aria-label="More actions for ${safeName}">•••</button></td>
     `;
-
-    const rowCheckbox = row.querySelector('.row-checkbox');
-    const moreButton = row.querySelector('.row-more-button');
-
-    rowCheckbox.addEventListener('click', (event) => {
-      event.stopPropagation();
-      togglePathSelection(entry.path);
-    });
-
-    moreButton.addEventListener('click', (event) => {
-      event.stopPropagation();
-      ensureSelectionContains(entry.path);
-      const rect = moreButton.getBoundingClientRect();
-      showContextMenu({ clientX: rect.right, clientY: rect.bottom });
-    });
 
     row.addEventListener('click', (event) => {
       hideContextMenu();
@@ -1028,7 +989,6 @@ uploadButtonEl.addEventListener('click', () => {
 });
 
 newFolderButtonEl.addEventListener('click', () => void createFolder());
-topRenameButtonEl.addEventListener('click', () => void renameSelected());
 contextRenameButtonEl.addEventListener('click', () => {
   hideContextMenu();
   void renameSelected();
@@ -1081,20 +1041,6 @@ nextPageButtonEl.addEventListener('click', () => {
   renderCurrentView();
 });
 
-selectAllCheckboxEl.addEventListener('change', () => {
-  for (const entry of state.visibleEntries) {
-    if (selectAllCheckboxEl.checked) {
-      state.selectedPaths.add(entry.path);
-    } else {
-      state.selectedPaths.delete(entry.path);
-    }
-  }
-  state.lastSelectedPath = selectAllCheckboxEl.checked && state.visibleEntries.length > 0
-    ? state.visibleEntries[state.visibleEntries.length - 1].path
-    : null;
-  syncSelectedRows();
-});
-
 searchInputEl.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
     event.preventDefault();
@@ -1117,8 +1063,7 @@ document.addEventListener('click', (event) => {
   const target = event.target;
   if (
     target.closest('.entry-row') ||
-    target.closest('#contextMenu') ||
-    target.closest('#selectionActions')
+    target.closest('#contextMenu')
   ) {
     return;
   }
@@ -1205,26 +1150,6 @@ contextDownloadButtonEl.addEventListener('click', async () => {
 });
 
 contextDeleteButtonEl.addEventListener('click', async () => {
-  hideContextMenu();
-  await deleteSelected();
-});
-
-topCopyButtonEl.addEventListener('click', async () => {
-  hideContextMenu();
-  copySelected();
-});
-
-topPasteButtonEl.addEventListener('click', async () => {
-  hideContextMenu();
-  await pasteClipboard();
-});
-
-topDownloadButtonEl.addEventListener('click', async () => {
-  hideContextMenu();
-  await downloadSelected();
-});
-
-topDeleteButtonEl.addEventListener('click', async () => {
   hideContextMenu();
   await deleteSelected();
 });

@@ -23,7 +23,6 @@ test('renders the functional browser controls in the redesigned shell', () => {
     'searchInput',
     'breadcrumbs',
     'entriesTableBody',
-    'selectAllCheckbox',
     'storageDevicesList',
     'filesystemsList',
     'detailsDrawer',
@@ -44,4 +43,15 @@ test('renders the functional browser controls in the redesigned shell', () => {
 test('does not trigger recursive directory sizing when a row is selected', () => {
   assert.doesNotMatch(appScript, /revealSize\(/);
   assert.doesNotMatch(appScript, /getEntrySize\(/);
+});
+
+test('uses Finder-style row selection with actions restricted to the context menu', () => {
+  assert.doesNotMatch(html, /class="row-checkbox"/);
+  assert.doesNotMatch(html, /id="selectionActions"/);
+  assert.doesNotMatch(html, /id="top(?:Copy|Rename|Paste|Download|Delete)Button"/);
+  assert.doesNotMatch(appScript, /selectAllCheckboxEl/);
+  assert.match(appScript, /event\.shiftKey/);
+  assert.match(appScript, /event\.metaKey \|\| event\.ctrlKey/);
+  assert.match(appScript, /ensureSelectionContains\(entry\.path\)/);
+  assert.match(appScript, /row\.addEventListener\('contextmenu'/);
 });

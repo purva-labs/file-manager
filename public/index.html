@@ -67,24 +67,12 @@
           </header>
 
           <section class="workspace">
-            <div id="selectionActions" class="selection-actions" aria-hidden="true">
-              <div id="selectionCount" class="selection-count">0 selected</div>
-              <div class="selection-buttons">
-                <button id="topCopyButton" type="button" aria-label="Copy selected items"><span aria-hidden="true">⧉</span><span>Copy</span></button>
-                <button id="topRenameButton" type="button" aria-label="Rename selected item"><span aria-hidden="true">✎</span><span>Rename</span></button>
-                <button id="topPasteButton" type="button" aria-label="Paste copied items"><span aria-hidden="true">▣</span><span>Paste</span></button>
-                <button id="topDownloadButton" type="button" aria-label="Download selected items"><span aria-hidden="true">↓</span><span>Download</span></button>
-                <button id="topDeleteButton" class="danger" type="button" aria-label="Delete selected items"><span aria-hidden="true">×</span><span>Delete</span></button>
-              </div>
-            </div>
-
             <div id="dropZone" class="table-frame">
               <div class="drop-hint" aria-hidden="true">Drop files here to upload</div>
               <div class="table-scroll">
                 <table>
                   <thead>
                     <tr>
-                      <th class="select-column"><input id="selectAllCheckbox" class="row-checkbox" type="checkbox" aria-label="Select all visible files" /></th>
                       <th data-sort-key="name" aria-sort="ascending">
                         <button class="sort-button active" type="button" data-sort-key="name"><span>Name</span><span class="sort-indicator" aria-hidden="true">↑</span></button>
                       </th>
@@ -97,7 +85,6 @@
                       <th data-sort-key="modifiedAt" aria-sort="none">
                         <button class="sort-button" type="button" data-sort-key="modifiedAt"><span>Modified</span><span class="sort-indicator" aria-hidden="true">↕</span></button>
                       </th>
-                      <th class="more-column"><span class="sr-only">Actions</span></th>
                     </tr>
                   </thead>
                   <tbody id="entriesTableBody"></tbody>

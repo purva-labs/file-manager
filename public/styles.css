@@ -519,54 +519,6 @@ button.danger {
   min-height: 0;
 }
 
-.selection-actions {
-  position: absolute;
-  z-index: 6;
-  top: 7px;
-  left: 50%;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  max-width: calc(100% - 24px);
-  padding: 7px 9px 7px 13px;
-  border: 1px solid #37577d;
-  border-radius: 11px;
-  background: rgba(12, 27, 45, 0.97);
-  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.4);
-  opacity: 0;
-  pointer-events: none;
-  transform: translate(-50%, -8px);
-  transition: opacity 140ms ease, transform 140ms ease;
-}
-
-.selection-actions.show {
-  opacity: 1;
-  pointer-events: auto;
-  transform: translate(-50%, 0);
-}
-
-.selection-count {
-  color: #cfe1f6;
-  font-size: 0.73rem;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.selection-buttons {
-  display: flex;
-  gap: 5px;
-}
-
-.selection-buttons button {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  min-height: 31px;
-  padding: 0 9px;
-  border-radius: 7px;
-  font-size: 0.68rem;
-}
-
 .table-frame {
   position: relative;
   display: flex;
@@ -632,17 +584,6 @@ th {
   font-weight: 700;
 }
 
-.select-column {
-  width: 45px;
-  padding: 0;
-  text-align: center;
-}
-
-.more-column {
-  width: 48px;
-  padding: 0;
-}
-
 .sort-button {
   display: inline-flex;
   align-items: center;
@@ -699,31 +640,6 @@ th {
   background: rgba(46, 213, 231, 0.16);
 }
 
-.row-checkbox {
-  appearance: none;
-  display: inline-grid;
-  place-content: center;
-  width: 15px;
-  height: 15px;
-  margin: 0;
-  border: 1px solid #627a98;
-  border-radius: 4px;
-  background: #091526;
-  cursor: pointer;
-}
-
-.row-checkbox:checked {
-  border-color: var(--accent);
-  background: var(--accent);
-}
-
-.row-checkbox:checked::after {
-  content: '✓';
-  color: #04222a;
-  font-size: 0.64rem;
-  font-weight: 900;
-}
-
 .file-name {
   display: flex;
   align-items: center;
@@ -764,25 +680,8 @@ th {
 }
 
 .size-cell,
-.entry-row td:nth-child(3),
-.entry-row td:nth-child(5) {
+.entry-row td:nth-child(n+2) {
   color: var(--muted);
-}
-
-.row-more-button {
-  min-width: 30px;
-  min-height: 30px;
-  padding: 0;
-  border-color: transparent;
-  background: transparent;
-  color: var(--muted);
-  letter-spacing: 0.08em;
-}
-
-.row-more-button:hover:enabled {
-  border-color: var(--line);
-  background: var(--panel-hover);
-  transform: none;
 }
 
 .empty-row td {
@@ -1506,22 +1405,6 @@ th {
 
   .table-footer > span:nth-child(2),
   .pagination > span {
-    display: none;
-  }
-
-  .selection-actions {
-    left: 8px;
-    right: 8px;
-    max-width: none;
-    overflow-x: auto;
-    transform: translate(0, -8px);
-  }
-
-  .selection-actions.show {
-    transform: translate(0, 0);
-  }
-
-  .selection-buttons button span:last-child {
     display: none;
   }
 
