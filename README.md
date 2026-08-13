@@ -15,6 +15,7 @@ It can also run as a distributed hub with a small authenticated agent on every n
 - Select and browse multiple nodes through one hub UI
 - Stream uploads and downloads through the hub without exposing agent credentials
 - Bind both hub and agents to a Tailscale address only
+- Discover mounted persistent filesystems so system disks, attached disks, and network mounts are visible separately
 
 ## Quick start
 
@@ -53,6 +54,8 @@ Create separate random tokens for every node, store them with mode `0600`, and k
 ## Distributed deployment
 
 The hub machine runs both `deploy/compose-hub-and-agent.yml` and its own agent. Other machines run `deploy/compose-agent.yml`.
+
+For a lightweight Ubuntu node without Docker, install the application under `/opt/file-manager-agent`, place its environment and token under `/etc/file-manager-agent`, and use `deploy/file-manager-agent.service`. A supported Home Assistant local-app package is provided under `deploy/homeassistant-addon`; HAOS exposes its persistent configuration, app data, backups, media, share, and SSL areas rather than its immutable operating-system image.
 
 For the hub host, create a private `nodes.json` from `deploy/nodes.example.json`. Each `url` should be the node's current Tailscale IPv4 address and agent port. Each `tokenFile` is the path as seen inside the hub container under `/run/file-manager/secrets`.
 

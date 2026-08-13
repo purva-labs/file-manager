@@ -9,7 +9,7 @@ const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'file-manager-outside-'));
 const realRoot = fs.realpathSync(root);
 process.env.FILEMANAGER_ROOT = root;
 
-const { resolveSafeChildPath, resolveSafePath, validateEntryName } = require('../src/server');
+const { parseMountInfo, resolveSafeChildPath, resolveSafePath, validateEntryName } = require('../src/server');
 
 test.after(() => {
   fs.rmSync(root, { recursive: true, force: true });
@@ -41,4 +41,20 @@ test('rejects symbolic links that resolve outside the configured root', async ()
 test('validates new entry names and keeps children beneath the root', async () => {
   assert.throws(() => validateEntryName('../escape'), /single file or folder name/);
   assert.equal(await resolveSafeChildPath(root, 'new-folder'), path.join(realRoot, 'new-folder'));
+});
+
+test('parses persistent mount metadata and escaped paths', () => {
+  const mounts = parseMountInfo(
+    '29 23 8:1 / /host rw,relatime - ext4 /dev/sda1 rw\n' +
+      '30 29 8:17 / /host/srv/My\\040Disk rw,relatime - ext4 /dev/sdb1 rw\n'
+  );
+  assert.deepEqual(mounts, [
+    { mountPath: '/host', options: ['rw', 'relatime'], type: 'ext4', source: '/dev/sda1' },
+    {
+      mountPath: '/host/srv/My Disk',
+      options: ['rw', 'relatime'],
+      type: 'ext4',
+      source: '/dev/sdb1',
+    },
+  ]);
 });

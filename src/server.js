@@ -17,6 +17,10 @@ const MAX_PREVIEW_BYTES = 2 * 1024 * 1024;
 const MAX_UPLOAD_FILE_BYTES = 512 * 1024 * 1024;
 const MAX_UPLOAD_FILES = 100;
 const ROOT_REAL_PATH = fs.realpath(ROOT_PATH);
+const STORAGE_FILESYSTEM_TYPES = new Set([
+  'btrfs', 'cifs', 'exfat', 'ext2', 'ext3', 'ext4', 'fuseblk',
+  'nfs', 'nfs4', 'ntfs', 'ntfs3', 'vfat', 'xfs', 'zfs',
+]);
 
 function readAgentToken() {
   if (process.env.FILEMANAGER_AGENT_TOKEN_FILE) {
@@ -350,6 +354,68 @@ async function getFilesystemUsage(targetPath) {
   }
 }
 
+function decodeMountField(value) {
+  return String(value || '').replace(/\\([0-7]{3})/g, (match, octal) =>
+    String.fromCharCode(Number.parseInt(octal, 8))
+  );
+}
+
+function parseMountInfo(content) {
+  const mounts = [];
+  for (const line of String(content || '').split('\n')) {
+    if (!line.trim()) continue;
+    const sections = line.split(' - ');
+    if (sections.length !== 2) continue;
+    const left = sections[0].split(' ');
+    const right = sections[1].split(' ');
+    if (left.length < 6 || right.length < 3) continue;
+    mounts.push({
+      mountPath: decodeMountField(left[4]),
+      options: left[5].split(','),
+      type: right[0],
+      source: decodeMountField(right[1]),
+    });
+  }
+  return mounts;
+}
+
+async function listStorageFilesystems() {
+  const rootRealPath = await ROOT_REAL_PATH;
+  const mountInfo = await fs.readFile('/proc/self/mountinfo', 'utf8');
+  const filesystems = [];
+  const seen = new Set();
+
+  for (const mount of parseMountInfo(mountInfo)) {
+    if (!STORAGE_FILESYSTEM_TYPES.has(mount.type)) continue;
+    if (!isWithin(rootRealPath, mount.mountPath)) continue;
+
+    const displayPath = await toDisplayPath(mount.mountPath);
+    const key = `${mount.source}\u0000${displayPath}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    try {
+      const usage = await getFilesystemUsage(mount.mountPath);
+      filesystems.push({
+        mountPath: displayPath,
+        source: mount.source,
+        type: mount.type,
+        writable: mount.options.includes('rw'),
+        ...usage,
+      });
+    } catch {
+      // A removable or network filesystem can disappear during discovery.
+    }
+  }
+
+  filesystems.sort((a, b) => {
+    if (a.mountPath === DISPLAY_ROOT_PATH) return -1;
+    if (b.mountPath === DISPLAY_ROOT_PATH) return 1;
+    return a.mountPath.localeCompare(b.mountPath);
+  });
+  return filesystems;
+}
+
 async function computeDirectorySize(targetPath) {
   let stats;
   try {
@@ -412,6 +478,14 @@ app.get('/api/storage', async (req, res, next) => {
       freeBytes: usage.freeBytes,
       availableBytes: usage.availableBytes,
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/filesystems', async (req, res, next) => {
+  try {
+    res.json({ filesystems: await listStorageFilesystems() });
   } catch (error) {
     next(error);
   }
@@ -788,6 +862,8 @@ if (require.main === module) {
 module.exports = {
   app,
   isWithin,
+  listStorageFilesystems,
+  parseMountInfo,
   resolveSafePath,
   resolveSafeChildPath,
   toDisplayPath,

@@ -33,6 +33,7 @@ const storageSummaryEl = document.getElementById('storageSummary');
 const storageBarUsedEl = document.getElementById('storageBarUsed');
 const storageBarFreeEl = document.getElementById('storageBarFree');
 const storageMetaEl = document.getElementById('storageMeta');
+const filesystemsListEl = document.getElementById('filesystemsList');
 const entriesTableBodyEl = document.getElementById('entriesTableBody');
 const breadcrumbsEl = document.getElementById('breadcrumbs');
 const searchInputEl = document.getElementById('searchInput');
@@ -158,6 +159,7 @@ async function selectNode(nodeId) {
   try {
     await loadConfig();
     await loadStorage();
+    await loadFilesystems();
     await loadDirectory(state.currentPath);
     setNodeStatus(`${node.name} online`, 'online');
   } catch (error) {
@@ -192,6 +194,49 @@ async function loadStorage() {
     storageBarUsedEl.style.width = '0%';
     storageBarFreeEl.style.width = '100%';
     storageMetaEl.textContent = error.message;
+  }
+}
+
+async function loadFilesystems() {
+  try {
+    const data = await apiGet('/api/filesystems');
+    const filesystems = Array.isArray(data.filesystems) ? data.filesystems : [];
+    filesystemsListEl.innerHTML = '';
+
+    if (filesystems.length === 0) {
+      filesystemsListEl.innerHTML = '<p class="storage-meta">No persistent mounts discovered.</p>';
+      return;
+    }
+
+    for (const filesystem of filesystems) {
+      const total = Number(filesystem.totalBytes || 0);
+      const free = Number(filesystem.freeBytes || 0);
+      const used = Number(filesystem.usedBytes || 0);
+      const usedPercent = total > 0 ? Math.min(100, Math.max(0, (used / total) * 100)) : 0;
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'filesystem-button';
+
+      const heading = document.createElement('span');
+      heading.className = 'filesystem-heading';
+      heading.textContent = filesystem.mountPath;
+      const source = document.createElement('span');
+      source.className = 'filesystem-source';
+      source.textContent = `${filesystem.source} • ${filesystem.type}${filesystem.writable ? ' • rw' : ' • ro'}`;
+      const usage = document.createElement('span');
+      usage.className = 'filesystem-usage';
+      usage.textContent = `${formatBytes(free)} free of ${formatBytes(total)} • ${formatPercent(usedPercent)} used`;
+
+      button.append(heading, source, usage);
+      button.addEventListener('click', () => void navigateTo(filesystem.mountPath));
+      filesystemsListEl.appendChild(button);
+    }
+  } catch (error) {
+    filesystemsListEl.innerHTML = '';
+    const message = document.createElement('p');
+    message.className = 'storage-meta';
+    message.textContent = `Mount discovery unavailable: ${error.message}`;
+    filesystemsListEl.appendChild(message);
   }
 }
 
@@ -662,6 +707,7 @@ async function uploadFiles(fileList) {
     state.sizeCache.clear();
     await loadDirectory(state.currentPath, { recordHistory: false });
     await loadStorage();
+    await loadFilesystems();
   } catch (error) {
     showToast(error.message);
   }
@@ -688,6 +734,7 @@ refreshButtonEl.addEventListener('click', async () => {
   hideContextMenu();
   await loadDirectory(state.currentPath, { recordHistory: false });
   await loadStorage();
+  await loadFilesystems();
   showToast('Refreshed');
 });
 
@@ -873,6 +920,7 @@ topDeleteButtonEl.addEventListener('click', async () => {
     }
     await loadConfig();
     await loadStorage();
+    await loadFilesystems();
     await loadDirectory(state.currentPath);
   } catch (error) {
     showToast(`Initialization failed: ${error.message}`);
