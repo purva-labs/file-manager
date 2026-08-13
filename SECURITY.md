@@ -8,4 +8,8 @@ Please use GitHub's private vulnerability reporting. Do not publish vulnerabilit
 
 Standalone File Manager can read, modify, and delete everything below `FILEMANAGER_ROOT`. It has no built-in user authentication. Bind it to localhost and add authentication at a trusted reverse proxy before network exposure.
 
-Distributed agent mode requires a bearer token and is designed to bind to a private Tailscale address. When configured with the host root read/write, the agent is intentionally root-equivalent: anyone who can reach the hub UI can read, change, or delete host files. Never publish the hub or agent port through a public reverse proxy, never commit node tokens, use a different random token per node, and restrict the token files to root.
+Distributed agent mode requires a bearer token and is designed to bind to a specific address on a private overlay network such as Tailscale or WireGuard. When configured with the host root read/write, the agent is intentionally root-equivalent: anyone who can reach the hub UI can read, change, or delete host files.
+
+The hub UI has no built-in user authentication. Network access controls are the user-facing authorization boundary. Never bind a distributed service to a wildcard or public address, publish the hub or agent port through a public reverse proxy, commit node tokens, or reuse one token across nodes. Restrict deployment configuration and tokens to root with mode `0600`.
+
+The hub sends agent requests to administrator-configured URLs. Treat write access to `nodes.json` and the token directory as equivalent to control of the deployment.

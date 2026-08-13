@@ -8,11 +8,14 @@
     "dev": "node src/server.js",
     "lint": "echo \"No lint configured\""
   },
-  "keywords": ["file-manager", "self-hosted", "docker"],
+  "keywords": ["file-manager", "self-hosted", "docker", "multi-node", "tailscale"],
   "author": "Anikesh Thakur",
   "license": "MIT",
-  "description": "A lightweight web file manager scoped to one configurable root directory.",
+  "description": "A self-hosted file manager with an authenticated hub-and-agent mode for multiple nodes.",
   "repository": "https://github.com/purva-labs/file-manager",
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "express": "^5.2.1",
     "multer": "^2.1.1"

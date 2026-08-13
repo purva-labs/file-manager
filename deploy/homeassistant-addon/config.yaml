@@ -4,6 +4,7 @@ slug: file_manager_agent
 description: Authenticated root file agent for the distributed File Manager hub
 url: https://github.com/purva-labs/file-manager
 arch:
+  - aarch64
   - amd64
 startup: application
 boot: auto
@@ -32,7 +33,7 @@ map:
     read_only: false
     path: /host/ssl
 options:
-  listen_host: 192.168.68.114
+  listen_host: 127.0.0.1
   port: 3091
 schema:
   listen_host: str

@@ -7,3 +7,4 @@ deploy/*.env
 deploy/nodes.json
 deploy/secrets/
 .deploy/
+dist/

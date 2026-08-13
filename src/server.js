@@ -34,6 +34,9 @@ const AGENT_TOKEN = readAgentToken();
 if (MODE === 'agent' && !AGENT_TOKEN) {
   throw new Error('Agent mode requires FILEMANAGER_AGENT_TOKEN_FILE or FILEMANAGER_AGENT_TOKEN.');
 }
+if (MODE === 'agent' && Buffer.byteLength(AGENT_TOKEN) < 32) {
+  throw new Error('Agent token must contain at least 32 bytes.');
+}
 
 function tokenMatches(candidate) {
   const actual = Buffer.from(AGENT_TOKEN);

@@ -1,17 +1,16 @@
 {
   "nodes": [
     {
-      "id": "ubuntu-purva",
-      "name": "Ubuntu VM",
+      "id": "server-one",
+      "name": "Server One",
       "url": "http://100.64.0.10:3091",
-      "tokenFile": "/run/file-manager/secrets/ubuntu-purva.token"
+      "tokenFile": "/run/file-manager/secrets/server-one.token"
     },
     {
-      "id": "pi-purva",
-      "name": "Pi 5",
+      "id": "nas",
+      "name": "NAS",
       "url": "http://100.64.0.11:3091",
-      "tokenFile": "/run/file-manager/secrets/pi-purva.token"
+      "tokenFile": "/run/file-manager/secrets/nas.token"
     }
   ]
 }
-

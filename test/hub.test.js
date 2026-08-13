@@ -6,7 +6,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'file-manager-hub-'));
-const token = 'test-token-that-is-not-a-secret';
+const token = 'test-token-that-is-not-a-secret-32-bytes';
 const tokenFile = path.join(tempDir, 'node.token');
 const configFile = path.join(tempDir, 'nodes.json');
 fs.writeFileSync(tokenFile, `${token}\n`, { mode: 0o600 });
@@ -64,4 +64,16 @@ test('proxies node API calls with the server-side token', async () => {
   );
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { rootPath: '/' });
+});
+
+test('rejects short node tokens', () => {
+  const shortTokenFile = path.join(tempDir, 'short.token');
+  const shortConfigFile = path.join(tempDir, 'short-nodes.json');
+  fs.writeFileSync(shortTokenFile, 'too-short\n', { mode: 0o600 });
+  fs.writeFileSync(shortConfigFile, JSON.stringify({
+    nodes: [{ id: 'short-token', url: 'http://127.0.0.1:3091', tokenFile: shortTokenFile }],
+  }));
+
+  const { loadNodes } = require('../src/hub');
+  assert.throws(() => loadNodes(shortConfigFile), /at least 32 bytes/);
 });

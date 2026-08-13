@@ -39,6 +39,9 @@ function loadNodes(configFile = NODES_CONFIG_FILE) {
     if (!token) {
       throw new Error(`Node ${id} token file is empty.`);
     }
+    if (Buffer.byteLength(token) < 32) {
+      throw new Error(`Node ${id} token must contain at least 32 bytes.`);
+    }
 
     ids.add(id);
     return { id, name, url, token };

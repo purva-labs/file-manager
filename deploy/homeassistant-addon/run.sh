@@ -15,4 +15,3 @@ export FILEMANAGER_DISPLAY_ROOT=/
 export FILEMANAGER_AGENT_TOKEN_FILE="${token_file}"
 
 exec node /app/src/server.js
-
