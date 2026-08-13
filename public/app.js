@@ -16,6 +16,7 @@ const state = {
   clipboardPaths: [],
   history: [],
   historyIndex: -1,
+  nodeHealth: new Map(),
 };
 
 const appBasePath = window.location.pathname.startsWith('/admin-proxy/filemanager')
@@ -30,6 +31,10 @@ const nodeApiUrl = (pathValue) => {
 const nodesCardEl = document.getElementById('nodesCard');
 const nodeButtonsEl = document.getElementById('nodeButtons');
 const nodeStatusEl = document.getElementById('nodeStatus');
+const nodeCountEl = document.getElementById('nodeCount');
+const quickInfoNodeEl = document.getElementById('quickInfoNode');
+const quickInfoStatusEl = document.getElementById('quickInfoStatus');
+const quickInfoModeEl = document.getElementById('quickInfoMode');
 const rootPathEl = document.getElementById('rootPath');
 const storageSummaryEl = document.getElementById('storageSummary');
 const storageBarUsedEl = document.getElementById('storageBarUsed');
@@ -38,6 +43,10 @@ const storageMetaEl = document.getElementById('storageMeta');
 const storageDevicesListEl = document.getElementById('storageDevicesList');
 const filesystemsListEl = document.getElementById('filesystemsList');
 const entriesTableBodyEl = document.getElementById('entriesTableBody');
+const selectAllCheckboxEl = document.getElementById('selectAllCheckbox');
+const footerItemCountEl = document.getElementById('footerItemCount');
+const footerSelectionCountEl = document.getElementById('footerSelectionCount');
+const paginationSummaryEl = document.getElementById('paginationSummary');
 const sortButtons = [...document.querySelectorAll('.sort-button')];
 const breadcrumbsEl = document.getElementById('breadcrumbs');
 const searchInputEl = document.getElementById('searchInput');
@@ -62,6 +71,10 @@ const contextRenameButtonEl = document.getElementById('contextRenameButton');
 const contextPasteButtonEl = document.getElementById('contextPasteButton');
 const contextDownloadButtonEl = document.getElementById('contextDownloadButton');
 const contextDeleteButtonEl = document.getElementById('contextDeleteButton');
+const detailsDrawerEl = document.getElementById('detailsDrawer');
+const drawerToggleEl = document.getElementById('drawerToggle');
+const drawerTabs = [...document.querySelectorAll('.drawer-tab')];
+const drawerPanels = [...document.querySelectorAll('.drawer-panel')];
 
 function showToast(message, duration = 2200) {
   toastEl.textContent = message;
@@ -88,6 +101,15 @@ function formatDate(iso) {
 function formatPercent(value) {
   if (!Number.isFinite(value)) return '0.0%';
   return `${value.toFixed(1)}%`;
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
 }
 
 async function apiGet(url) {
@@ -117,6 +139,20 @@ async function apiSend(url, method, body) {
 function setNodeStatus(message, status = '') {
   nodeStatusEl.textContent = message;
   nodeStatusEl.className = `node-status ${status}`.trim();
+  if (state.activeNodeId && status) {
+    state.nodeHealth.set(state.activeNodeId, status);
+    renderNodeButtons();
+  }
+  quickInfoStatusEl.textContent = status === 'offline'
+    ? '● Offline'
+    : status === 'connecting'
+      ? '● Connecting'
+      : '● Online';
+  quickInfoStatusEl.className = status === 'offline'
+    ? 'offline-text'
+    : status === 'connecting'
+      ? 'connecting-text'
+      : 'online-text';
 }
 
 function renderNodeButtons() {
@@ -126,10 +162,33 @@ function renderNodeButtons() {
     button.type = 'button';
     button.className = 'node-button';
     button.classList.toggle('active', node.id === state.activeNodeId);
-    button.textContent = node.name;
+    const health = state.nodeHealth.get(node.id) || 'available';
+    const icon = document.createElement('span');
+    icon.className = 'node-icon';
+    icon.setAttribute('aria-hidden', 'true');
+    const copy = document.createElement('span');
+    copy.className = 'node-copy';
+    const name = document.createElement('span');
+    name.className = 'node-name';
+    name.textContent = node.name;
+    const status = document.createElement('span');
+    status.className = `node-health ${health}`;
+    const dot = document.createElement('span');
+    dot.className = 'health-dot';
+    const statusText = document.createTextNode(
+      health === 'online' ? 'Online' : health === 'offline' ? 'Offline' : health === 'connecting' ? 'Connecting' : 'Available'
+    );
+    status.append(dot, statusText);
+    copy.append(name, status);
+    const chevron = document.createElement('span');
+    chevron.className = 'node-chevron';
+    chevron.setAttribute('aria-hidden', 'true');
+    chevron.textContent = '›';
+    button.append(icon, copy, chevron);
     button.addEventListener('click', () => void selectNode(node.id));
     nodeButtonsEl.appendChild(button);
   }
+  nodeCountEl.textContent = `${state.nodes.length} configured`;
 }
 
 async function loadNodes() {
@@ -143,6 +202,8 @@ async function loadNodes() {
   state.nodes = Array.isArray(data.nodes) ? data.nodes : [];
   if (state.nodes.length === 0) throw new Error('The hub has no configured nodes.');
   nodesCardEl.hidden = false;
+  quickInfoModeEl.textContent = 'Hub + agents';
+  renderNodeButtons();
   return true;
 }
 
@@ -157,6 +218,7 @@ async function selectNode(nodeId) {
   state.clipboardPaths = [];
   state.entries = [];
   clearSelection();
+  quickInfoNodeEl.textContent = node.name;
   renderNodeButtons();
   setNodeStatus(`Connecting to ${node.name}...`, 'connecting');
 
@@ -339,8 +401,14 @@ function clearSelection() {
 
 function syncSelectedRows() {
   for (const [pathValue, row] of state.rowByPath.entries()) {
-    row.classList.toggle('selected', state.selectedPaths.has(pathValue));
+    const selected = state.selectedPaths.has(pathValue);
+    row.classList.toggle('selected', selected);
+    const checkbox = row.querySelector('.row-checkbox');
+    if (checkbox) checkbox.checked = selected;
   }
+  const visiblePaths = state.visibleEntries.map((entry) => entry.path);
+  selectAllCheckboxEl.checked = visiblePaths.length > 0 && visiblePaths.every((pathValue) => state.selectedPaths.has(pathValue));
+  selectAllCheckboxEl.indeterminate = !selectAllCheckboxEl.checked && visiblePaths.some((pathValue) => state.selectedPaths.has(pathValue));
   updateActionControls();
 }
 
@@ -419,6 +487,7 @@ function updateActionControls() {
   selectionActionsEl.classList.toggle('show', hasSelection);
   selectionActionsEl.setAttribute('aria-hidden', String(!hasSelection));
   selectionCountEl.textContent = `${state.selectedPaths.size} selected`;
+  footerSelectionCountEl.textContent = `${state.selectedPaths.size} selected`;
 
   topCopyButtonEl.disabled = !hasSelection;
   topRenameButtonEl.disabled = state.selectedPaths.size !== 1;
@@ -539,7 +608,7 @@ function renderEntries(entries) {
     const row = document.createElement('tr');
     row.className = 'empty-row';
     row.innerHTML = `
-      <td colspan="4">${state.searchQuery.trim() ? 'No matches found.' : 'This folder is empty.'}</td>
+      <td colspan="6">${state.searchQuery.trim() ? 'No matches found.' : 'This folder is empty.'}</td>
     `;
     entriesTableBodyEl.appendChild(row);
     syncSelectedRows();
@@ -550,23 +619,43 @@ function renderEntries(entries) {
     const row = document.createElement('tr');
     row.className = 'entry-row';
     const [label, className] = fileIcon(entry.type);
+    const safeName = escapeHtml(entry.name);
+    const safeType = escapeHtml(entry.type);
     const cachedSize = state.sizeCache.get(entry.path);
     const sizeLabel =
       entry.type === 'file' ? formatBytes(entry.size) : cachedSize != null ? formatBytes(cachedSize) : 'Click to load';
 
     row.innerHTML = `
+      <td class="select-column">
+        <input class="row-checkbox" type="checkbox" aria-label="Select ${safeName}">
+      </td>
       <td>
         <div class="file-name">
           <span class="file-icon ${className}">${label}</span>
-          <span>${entry.name}</span>
+          <span>${safeName}</span>
         </div>
       </td>
-      <td>${entry.type}</td>
+      <td>${safeType}</td>
       <td class="size-cell">${sizeLabel}</td>
-      <td>${formatDate(entry.modifiedAt)}</td>
+      <td>${escapeHtml(formatDate(entry.modifiedAt))}</td>
+      <td class="more-column"><button class="row-more-button" type="button" aria-label="More actions for ${safeName}">•••</button></td>
     `;
 
     const sizeCell = row.querySelector('.size-cell');
+    const rowCheckbox = row.querySelector('.row-checkbox');
+    const moreButton = row.querySelector('.row-more-button');
+
+    rowCheckbox.addEventListener('click', (event) => {
+      event.stopPropagation();
+      togglePathSelection(entry.path);
+    });
+
+    moreButton.addEventListener('click', (event) => {
+      event.stopPropagation();
+      ensureSelectionContains(entry.path);
+      const rect = moreButton.getBoundingClientRect();
+      showContextMenu({ clientX: rect.right, clientY: rect.bottom });
+    });
 
     row.addEventListener('click', (event) => {
       hideContextMenu();
@@ -601,12 +690,17 @@ function renderEntries(entries) {
 }
 
 function renderCurrentView() {
-  renderEntries(FileManagerSort.sortEntries(
+  const visibleEntries = FileManagerSort.sortEntries(
     getFilteredEntries(),
     state.sortKey,
     state.sortDirection,
     state.sizeCache
-  ));
+  );
+  renderEntries(visibleEntries);
+  footerItemCountEl.textContent = `${visibleEntries.length} item${visibleEntries.length === 1 ? '' : 's'}`;
+  paginationSummaryEl.textContent = visibleEntries.length === 0
+    ? 'Showing 0 items'
+    : `Showing 1–${visibleEntries.length} of ${visibleEntries.length}`;
   updateSortHeaders();
 }
 
@@ -899,6 +993,20 @@ for (const button of sortButtons) {
   button.addEventListener('click', () => setSort(button.dataset.sortKey));
 }
 
+selectAllCheckboxEl.addEventListener('change', () => {
+  for (const entry of state.visibleEntries) {
+    if (selectAllCheckboxEl.checked) {
+      state.selectedPaths.add(entry.path);
+    } else {
+      state.selectedPaths.delete(entry.path);
+    }
+  }
+  state.lastSelectedPath = selectAllCheckboxEl.checked && state.visibleEntries.length > 0
+    ? state.visibleEntries[state.visibleEntries.length - 1].path
+    : null;
+  syncSelectedRows();
+});
+
 searchInputEl.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
     event.preventDefault();
@@ -1032,6 +1140,32 @@ topDeleteButtonEl.addEventListener('click', async () => {
   await deleteSelected();
 });
 
+for (const tab of drawerTabs) {
+  tab.addEventListener('click', () => {
+    const target = tab.dataset.tab;
+    for (const candidate of drawerTabs) {
+      const active = candidate === tab;
+      candidate.classList.toggle('active', active);
+      candidate.setAttribute('aria-selected', String(active));
+    }
+    for (const panel of drawerPanels) {
+      const active = panel.dataset.panel === target;
+      panel.classList.toggle('active', active);
+      panel.hidden = !active;
+    }
+    detailsDrawerEl.dataset.collapsed = 'false';
+    drawerToggleEl.setAttribute('aria-expanded', 'true');
+    drawerToggleEl.querySelector('span:first-child').textContent = 'Collapse';
+  });
+}
+
+drawerToggleEl.addEventListener('click', () => {
+  const collapsed = detailsDrawerEl.dataset.collapsed === 'true';
+  detailsDrawerEl.dataset.collapsed = String(!collapsed);
+  drawerToggleEl.setAttribute('aria-expanded', String(collapsed));
+  drawerToggleEl.querySelector('span:first-child').textContent = collapsed ? 'Collapse' : 'Expand';
+});
+
 (async function initialize() {
   try {
     const distributed = await loadNodes();
@@ -1039,6 +1173,8 @@ topDeleteButtonEl.addEventListener('click', async () => {
       await selectNode(state.nodes[0].id);
       return;
     }
+    quickInfoNodeEl.textContent = 'Local node';
+    quickInfoModeEl.textContent = 'Single node';
     await loadConfig();
     await loadFilesystems();
     await loadDirectory(state.currentPath);
