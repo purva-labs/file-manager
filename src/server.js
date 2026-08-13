@@ -448,6 +448,75 @@ function summarizeLocalFilesystems(filesystems) {
   });
 }
 
+function getStorageDeviceSource(source) {
+  const value = String(source || '').trim();
+  if (!value.startsWith('/dev/')) return value;
+  if (/^\/dev\/(nvme\d+n\d+|mmcblk\d+|md\d+)p\d+$/.test(value)) {
+    return value.replace(/p\d+$/, '');
+  }
+  if (/^\/dev\/(sd|vd|xvd|hd)[a-z]+\d+$/.test(value)) {
+    return value.replace(/\d+$/, '');
+  }
+  return value;
+}
+
+function summarizeLocalDevices(filesystems) {
+  const devices = new Map();
+  const seenSources = new Set();
+
+  for (const filesystem of filesystems) {
+    if (filesystem.network || NETWORK_FILESYSTEM_TYPES.has(filesystem.type)) continue;
+    const source = String(filesystem.source || filesystem.mountPath || '').trim();
+    if (!source || seenSources.has(source)) continue;
+    seenSources.add(source);
+
+    const device = getStorageDeviceSource(source) || source;
+    const summary = devices.get(device) || {
+      device,
+      primary: false,
+      filesystemCount: 0,
+      mountPaths: [],
+      totalBytes: 0,
+      usedBytes: 0,
+      freeBytes: 0,
+      availableBytes: 0,
+    };
+    summary.primary ||= filesystem.mountPath === DISPLAY_ROOT_PATH;
+    summary.filesystemCount += 1;
+    summary.mountPaths.push(filesystem.mountPath);
+    summary.totalBytes += Number(filesystem.totalBytes || 0);
+    summary.usedBytes += Number(filesystem.usedBytes || 0);
+    summary.freeBytes += Number(filesystem.freeBytes || 0);
+    summary.availableBytes += Number(filesystem.availableBytes || 0);
+    devices.set(device, summary);
+  }
+
+  return [...devices.values()].sort((a, b) => {
+    if (a.primary !== b.primary) return a.primary ? -1 : 1;
+    return a.device.localeCompare(b.device);
+  });
+}
+
+async function addBlockDeviceMetadata(deviceSummary) {
+  if (!deviceSummary.device.startsWith('/dev/')) return deviceSummary;
+  const blockName = path.basename(deviceSummary.device);
+  const sysfsRoot = path.join('/sys/class/block', blockName);
+
+  try {
+    const [model, rotational] = await Promise.all([
+      fs.readFile(path.join(sysfsRoot, 'device/model'), 'utf8').catch(() => ''),
+      fs.readFile(path.join(sysfsRoot, 'queue/rotational'), 'utf8').catch(() => ''),
+    ]);
+    return {
+      ...deviceSummary,
+      model: model.trim() || null,
+      mediaType: rotational.trim() === '1' ? 'HDD' : rotational.trim() === '0' ? 'SSD' : null,
+    };
+  } catch {
+    return deviceSummary;
+  }
+}
+
 async function computeDirectorySize(targetPath) {
   let stats;
   try {
@@ -518,7 +587,12 @@ app.get('/api/storage', async (req, res, next) => {
 app.get('/api/filesystems', async (req, res, next) => {
   try {
     const filesystems = await listStorageFilesystems();
-    res.json({ filesystems, localSummary: summarizeLocalFilesystems(filesystems) });
+    const localDevices = await Promise.all(summarizeLocalDevices(filesystems).map(addBlockDeviceMetadata));
+    res.json({
+      filesystems,
+      localSummary: summarizeLocalFilesystems(filesystems),
+      localDevices,
+    });
   } catch (error) {
     next(error);
   }
@@ -894,11 +968,13 @@ if (require.main === module) {
 
 module.exports = {
   app,
+  getStorageDeviceSource,
   isWithin,
   listStorageFilesystems,
   parseMountInfo,
   resolveSafePath,
   summarizeLocalFilesystems,
+  summarizeLocalDevices,
   resolveSafeChildPath,
   toDisplayPath,
   validateEntryName,

@@ -179,6 +179,55 @@ body {
   font-size: 0.84rem;
 }
 
+.storage-devices-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.storage-device {
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.storage-device-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text);
+  font-size: 0.8rem;
+}
+
+.storage-device-heading span,
+.storage-device-usage,
+.storage-device-mounts {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.storage-device-usage,
+.storage-device-mounts {
+  margin: 5px 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.storage-device-meter {
+  height: 7px;
+  margin-top: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #224166;
+}
+
+.storage-device-meter span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(120deg, #3e8cff, #4ea7ff);
+}
+
 .brand h1 {
   margin: 0;
   font-size: 1.2rem;

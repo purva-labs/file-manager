@@ -33,6 +33,7 @@ const storageSummaryEl = document.getElementById('storageSummary');
 const storageBarUsedEl = document.getElementById('storageBarUsed');
 const storageBarFreeEl = document.getElementById('storageBarFree');
 const storageMetaEl = document.getElementById('storageMeta');
+const storageDevicesListEl = document.getElementById('storageDevicesList');
 const filesystemsListEl = document.getElementById('filesystemsList');
 const entriesTableBodyEl = document.getElementById('entriesTableBody');
 const breadcrumbsEl = document.getElementById('breadcrumbs');
@@ -200,6 +201,8 @@ async function loadFilesystems() {
     storageBarUsedEl.style.width = `${usedPercent}%`;
     storageBarFreeEl.style.width = `${freePercent}%`;
     storageMetaEl.textContent = `${formatPercent(usedPercent)} used • ${localSummary.filesystemCount} local filesystem(s) • network mounts excluded`;
+    const localDevices = Array.isArray(data.localDevices) ? data.localDevices : buildLocalDeviceSummaries(filesystems);
+    renderStorageDevices(localDevices);
     filesystemsListEl.innerHTML = '';
 
     if (filesystems.length === 0) {
@@ -235,11 +238,88 @@ async function loadFilesystems() {
     storageBarUsedEl.style.width = '0%';
     storageBarFreeEl.style.width = '100%';
     storageMetaEl.textContent = error.message;
+    storageDevicesListEl.innerHTML = '';
     filesystemsListEl.innerHTML = '';
     const message = document.createElement('p');
     message.className = 'storage-meta';
     message.textContent = `Mount discovery unavailable: ${error.message}`;
     filesystemsListEl.appendChild(message);
+  }
+}
+
+function storageDeviceSource(source) {
+  const value = String(source || '').trim();
+  if (/^\/dev\/(nvme\d+n\d+|mmcblk\d+|md\d+)p\d+$/.test(value)) return value.replace(/p\d+$/, '');
+  if (/^\/dev\/(sd|vd|xvd|hd)[a-z]+\d+$/.test(value)) return value.replace(/\d+$/, '');
+  return value;
+}
+
+function buildLocalDeviceSummaries(filesystems) {
+  const devices = new Map();
+  const seenSources = new Set();
+  for (const filesystem of filesystems) {
+    if (filesystem.network || ['cifs', 'nfs', 'nfs4'].includes(filesystem.type)) continue;
+    const source = filesystem.source || filesystem.mountPath;
+    if (!source || seenSources.has(source)) continue;
+    seenSources.add(source);
+    const device = storageDeviceSource(source) || source;
+    const summary = devices.get(device) || {
+      device,
+      primary: false,
+      filesystemCount: 0,
+      mountPaths: [],
+      totalBytes: 0,
+      usedBytes: 0,
+      freeBytes: 0,
+    };
+    summary.primary ||= filesystem.mountPath === state.rootPath;
+    summary.filesystemCount += 1;
+    summary.mountPaths.push(filesystem.mountPath);
+    summary.totalBytes += Number(filesystem.totalBytes || 0);
+    summary.usedBytes += Number(filesystem.usedBytes || 0);
+    summary.freeBytes += Number(filesystem.freeBytes || 0);
+    devices.set(device, summary);
+  }
+  return [...devices.values()].sort((a, b) => Number(b.primary) - Number(a.primary) || a.device.localeCompare(b.device));
+}
+
+function renderStorageDevices(devices) {
+  storageDevicesListEl.innerHTML = '';
+  for (const device of devices) {
+    const total = Number(device.totalBytes || 0);
+    const used = Number(device.usedBytes || 0);
+    const free = Number(device.freeBytes || 0);
+    const usedPercent = total > 0 ? Math.min(100, Math.max(0, (used / total) * 100)) : 0;
+    const card = document.createElement('div');
+    card.className = 'storage-device';
+
+    const heading = document.createElement('div');
+    heading.className = 'storage-device-heading';
+    const title = document.createElement('strong');
+    title.textContent = `${device.primary ? 'System ' : ''}${device.mediaType || 'disk'}`;
+    const source = document.createElement('span');
+    source.textContent = device.device;
+    heading.append(title, source);
+
+    const usage = document.createElement('p');
+    usage.className = 'storage-device-usage';
+    usage.textContent = `${formatBytes(free)} free of ${formatBytes(total)} • ${formatPercent(usedPercent)} used`;
+    const meter = document.createElement('div');
+    meter.className = 'storage-device-meter';
+    meter.setAttribute('role', 'progressbar');
+    meter.setAttribute('aria-label', `${title.textContent} usage`);
+    meter.setAttribute('aria-valuenow', usedPercent.toFixed(1));
+    meter.setAttribute('aria-valuemin', '0');
+    meter.setAttribute('aria-valuemax', '100');
+    const usedBar = document.createElement('span');
+    usedBar.style.width = `${usedPercent}%`;
+    meter.appendChild(usedBar);
+
+    const mounts = document.createElement('p');
+    mounts.className = 'storage-device-mounts';
+    mounts.textContent = device.mountPaths.join(' • ');
+    card.append(heading, usage, meter, mounts);
+    storageDevicesListEl.appendChild(card);
   }
 }
 

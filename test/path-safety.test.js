@@ -10,16 +10,41 @@ const realRoot = fs.realpathSync(root);
 process.env.FILEMANAGER_ROOT = root;
 
 const {
+  getStorageDeviceSource,
   parseMountInfo,
   resolveSafeChildPath,
   resolveSafePath,
   summarizeLocalFilesystems,
+  summarizeLocalDevices,
   validateEntryName,
 } = require('../src/server');
 
 test.after(() => {
   fs.rmSync(root, { recursive: true, force: true });
   fs.rmSync(outside, { recursive: true, force: true });
+});
+
+test('groups partitions by their underlying local device', () => {
+  assert.equal(getStorageDeviceSource('/dev/sda16'), '/dev/sda');
+  assert.equal(getStorageDeviceSource('/dev/nvme0n1p2'), '/dev/nvme0n1');
+  assert.equal(getStorageDeviceSource('/dev/mmcblk0p1'), '/dev/mmcblk0');
+
+  assert.deepEqual(summarizeLocalDevices([
+    { mountPath: realRoot, source: '/dev/sda1', type: 'ext4', totalBytes: 100, usedBytes: 40, freeBytes: 60, availableBytes: 55 },
+    { mountPath: '/boot', source: '/dev/sda16', type: 'ext4', totalBytes: 10, usedBytes: 2, freeBytes: 8, availableBytes: 7 },
+    { mountPath: '/media', source: '/dev/sdb1', type: 'ext4', totalBytes: 900, usedBytes: 200, freeBytes: 700, availableBytes: 690 },
+    { mountPath: '/backups', source: '/dev/sdb2', type: 'ext4', totalBytes: 300, usedBytes: 50, freeBytes: 250, availableBytes: 245 },
+    { mountPath: '/remote', source: 'nas:/data', type: 'nfs4', network: true, totalBytes: 5000, usedBytes: 1000, freeBytes: 4000, availableBytes: 3900 },
+  ]), [
+    {
+      device: '/dev/sda', primary: true, filesystemCount: 2, mountPaths: [realRoot, '/boot'],
+      totalBytes: 110, usedBytes: 42, freeBytes: 68, availableBytes: 62,
+    },
+    {
+      device: '/dev/sdb', primary: false, filesystemCount: 2, mountPaths: ['/media', '/backups'],
+      totalBytes: 1200, usedBytes: 250, freeBytes: 950, availableBytes: 935,
+    },
+  ]);
 });
 
 test('accepts files beneath the configured root', async () => {
