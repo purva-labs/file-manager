@@ -158,7 +158,6 @@ async function selectNode(nodeId) {
 
   try {
     await loadConfig();
-    await loadStorage();
     await loadFilesystems();
     await loadDirectory(state.currentPath);
     setNodeStatus(`${node.name} online`, 'online');
@@ -175,32 +174,32 @@ async function loadConfig() {
   rootPathEl.textContent = config.rootPath;
 }
 
-async function loadStorage() {
+async function loadFilesystems() {
   try {
-    const storage = await apiGet('/api/storage');
-    const total = Number(storage.totalBytes || 0);
-    const free = Number(storage.freeBytes ?? storage.availableBytes ?? 0);
-    const available = Number(storage.availableBytes ?? free);
-    const used = Number(storage.usedBytes || 0);
+    const data = await apiGet('/api/filesystems');
+    const filesystems = Array.isArray(data.filesystems) ? data.filesystems : [];
+    const localSummary = data.localSummary || filesystems
+      .filter((filesystem) => !filesystem.network && !['cifs', 'nfs', 'nfs4'].includes(filesystem.type))
+      .filter((filesystem, index, all) => all.findIndex((candidate) =>
+        (candidate.source || candidate.mountPath) === (filesystem.source || filesystem.mountPath)) === index)
+      .reduce((summary, filesystem) => ({
+        filesystemCount: summary.filesystemCount + 1,
+        totalBytes: summary.totalBytes + Number(filesystem.totalBytes || 0),
+        usedBytes: summary.usedBytes + Number(filesystem.usedBytes || 0),
+        freeBytes: summary.freeBytes + Number(filesystem.freeBytes || 0),
+        availableBytes: summary.availableBytes + Number(filesystem.availableBytes || 0),
+      }), { filesystemCount: 0, totalBytes: 0, usedBytes: 0, freeBytes: 0, availableBytes: 0 });
+    const total = Number(localSummary.totalBytes || 0);
+    const free = Number(localSummary.freeBytes || 0);
+    const available = Number(localSummary.availableBytes || 0);
+    const used = Number(localSummary.usedBytes || 0);
     const usedPercent = total > 0 ? Math.min(100, Math.max(0, (used / total) * 100)) : 0;
     const freePercent = total > 0 ? Math.min(100, Math.max(0, (free / total) * 100)) : 0;
 
     storageSummaryEl.textContent = `${formatBytes(free)} free of ${formatBytes(total)}`;
     storageBarUsedEl.style.width = `${usedPercent}%`;
     storageBarFreeEl.style.width = `${freePercent}%`;
-    storageMetaEl.textContent = `${formatPercent(usedPercent)} used • ${formatBytes(free)} free • ${formatBytes(available)} available to non-root`;
-  } catch (error) {
-    storageSummaryEl.textContent = 'Disk usage unavailable';
-    storageBarUsedEl.style.width = '0%';
-    storageBarFreeEl.style.width = '100%';
-    storageMetaEl.textContent = error.message;
-  }
-}
-
-async function loadFilesystems() {
-  try {
-    const data = await apiGet('/api/filesystems');
-    const filesystems = Array.isArray(data.filesystems) ? data.filesystems : [];
+    storageMetaEl.textContent = `${formatPercent(usedPercent)} used • ${localSummary.filesystemCount} local filesystem(s) • network mounts excluded`;
     filesystemsListEl.innerHTML = '';
 
     if (filesystems.length === 0) {
@@ -232,6 +231,10 @@ async function loadFilesystems() {
       filesystemsListEl.appendChild(button);
     }
   } catch (error) {
+    storageSummaryEl.textContent = 'Disk usage unavailable';
+    storageBarUsedEl.style.width = '0%';
+    storageBarFreeEl.style.width = '100%';
+    storageMetaEl.textContent = error.message;
     filesystemsListEl.innerHTML = '';
     const message = document.createElement('p');
     message.className = 'storage-meta';
@@ -706,7 +709,6 @@ async function uploadFiles(fileList) {
     showToast(`Uploaded ${uploadedCount} item(s)`);
     state.sizeCache.clear();
     await loadDirectory(state.currentPath, { recordHistory: false });
-    await loadStorage();
     await loadFilesystems();
   } catch (error) {
     showToast(error.message);
@@ -733,7 +735,6 @@ backButtonEl.addEventListener('click', async () => {
 refreshButtonEl.addEventListener('click', async () => {
   hideContextMenu();
   await loadDirectory(state.currentPath, { recordHistory: false });
-  await loadStorage();
   await loadFilesystems();
   showToast('Refreshed');
 });
@@ -919,7 +920,6 @@ topDeleteButtonEl.addEventListener('click', async () => {
       return;
     }
     await loadConfig();
-    await loadStorage();
     await loadFilesystems();
     await loadDirectory(state.currentPath);
   } catch (error) {

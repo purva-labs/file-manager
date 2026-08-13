@@ -9,7 +9,13 @@ const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'file-manager-outside-'));
 const realRoot = fs.realpathSync(root);
 process.env.FILEMANAGER_ROOT = root;
 
-const { parseMountInfo, resolveSafeChildPath, resolveSafePath, validateEntryName } = require('../src/server');
+const {
+  parseMountInfo,
+  resolveSafeChildPath,
+  resolveSafePath,
+  summarizeLocalFilesystems,
+  validateEntryName,
+} = require('../src/server');
 
 test.after(() => {
   fs.rmSync(root, { recursive: true, force: true });
@@ -57,4 +63,21 @@ test('parses persistent mount metadata and escaped paths', () => {
       source: '/dev/sdb1',
     },
   ]);
+});
+
+test('summarizes unique local filesystems and excludes network mounts', () => {
+  const summary = summarizeLocalFilesystems([
+    { mountPath: '/', source: '/dev/sda1', type: 'ext4', totalBytes: 100, usedBytes: 40, freeBytes: 60, availableBytes: 55 },
+    { mountPath: '/bind', source: '/dev/sda1', type: 'ext4', totalBytes: 100, usedBytes: 40, freeBytes: 60, availableBytes: 55 },
+    { mountPath: '/data', source: '/dev/sdb1', type: 'xfs', totalBytes: 900, usedBytes: 200, freeBytes: 700, availableBytes: 690 },
+    { mountPath: '/remote', source: 'nas:/data', type: 'nfs4', network: true, totalBytes: 5000, usedBytes: 1000, freeBytes: 4000, availableBytes: 3900 },
+  ]);
+
+  assert.deepEqual(summary, {
+    filesystemCount: 2,
+    totalBytes: 1000,
+    usedBytes: 240,
+    freeBytes: 760,
+    availableBytes: 745,
+  });
 });

@@ -21,6 +21,7 @@ const STORAGE_FILESYSTEM_TYPES = new Set([
   'btrfs', 'cifs', 'exfat', 'ext2', 'ext3', 'ext4', 'fuseblk',
   'nfs', 'nfs4', 'ntfs', 'ntfs3', 'vfat', 'xfs', 'zfs',
 ]);
+const NETWORK_FILESYSTEM_TYPES = new Set(['cifs', 'nfs', 'nfs4']);
 
 function readAgentToken() {
   if (process.env.FILEMANAGER_AGENT_TOKEN_FILE) {
@@ -403,6 +404,7 @@ async function listStorageFilesystems() {
         mountPath: displayPath,
         source: mount.source,
         type: mount.type,
+        network: NETWORK_FILESYSTEM_TYPES.has(mount.type),
         writable: mount.options.includes('rw'),
         ...usage,
       });
@@ -417,6 +419,33 @@ async function listStorageFilesystems() {
     return a.mountPath.localeCompare(b.mountPath);
   });
   return filesystems;
+}
+
+function summarizeLocalFilesystems(filesystems) {
+  const localFilesystems = [];
+  const seenSources = new Set();
+
+  for (const filesystem of filesystems) {
+    if (filesystem.network || NETWORK_FILESYSTEM_TYPES.has(filesystem.type)) continue;
+    const sourceKey = String(filesystem.source || filesystem.mountPath || '').trim();
+    if (!sourceKey || seenSources.has(sourceKey)) continue;
+    seenSources.add(sourceKey);
+    localFilesystems.push(filesystem);
+  }
+
+  return localFilesystems.reduce((summary, filesystem) => ({
+    filesystemCount: summary.filesystemCount + 1,
+    totalBytes: summary.totalBytes + Number(filesystem.totalBytes || 0),
+    usedBytes: summary.usedBytes + Number(filesystem.usedBytes || 0),
+    freeBytes: summary.freeBytes + Number(filesystem.freeBytes || 0),
+    availableBytes: summary.availableBytes + Number(filesystem.availableBytes || 0),
+  }), {
+    filesystemCount: 0,
+    totalBytes: 0,
+    usedBytes: 0,
+    freeBytes: 0,
+    availableBytes: 0,
+  });
 }
 
 async function computeDirectorySize(targetPath) {
@@ -488,7 +517,8 @@ app.get('/api/storage', async (req, res, next) => {
 
 app.get('/api/filesystems', async (req, res, next) => {
   try {
-    res.json({ filesystems: await listStorageFilesystems() });
+    const filesystems = await listStorageFilesystems();
+    res.json({ filesystems, localSummary: summarizeLocalFilesystems(filesystems) });
   } catch (error) {
     next(error);
   }
@@ -868,6 +898,7 @@ module.exports = {
   listStorageFilesystems,
   parseMountInfo,
   resolveSafePath,
+  summarizeLocalFilesystems,
   resolveSafeChildPath,
   toDisplayPath,
   validateEntryName,
