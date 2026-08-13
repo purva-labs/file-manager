@@ -1,0 +1,17 @@
+{
+  "nodes": [
+    {
+      "id": "ubuntu-purva",
+      "name": "Ubuntu VM",
+      "url": "http://100.64.0.10:3091",
+      "tokenFile": "/run/file-manager/secrets/ubuntu-purva.token"
+    },
+    {
+      "id": "pi-purva",
+      "name": "Pi 5",
+      "url": "http://100.64.0.11:3091",
+      "tokenFile": "/run/file-manager/secrets/pi-purva.token"
+    }
+  ]
+}
+

@@ -1,4 +1,6 @@
 const state = {
+  activeNodeId: null,
+  nodes: [],
   rootPath: '/srv',
   currentPath: '/srv',
   sizeCache: new Map(),
@@ -18,7 +20,14 @@ const appBasePath = window.location.pathname.startsWith('/admin-proxy/filemanage
   ? '/admin-proxy/filemanager'
   : '';
 const appUrl = (pathValue) => `${appBasePath}${pathValue}`;
+const nodeApiUrl = (pathValue) => {
+  if (!state.activeNodeId || !pathValue.startsWith('/api')) return appUrl(pathValue);
+  return appUrl(`/api/nodes/${encodeURIComponent(state.activeNodeId)}${pathValue.slice(4)}`);
+};
 
+const nodesCardEl = document.getElementById('nodesCard');
+const nodeButtonsEl = document.getElementById('nodeButtons');
+const nodeStatusEl = document.getElementById('nodeStatus');
 const rootPathEl = document.getElementById('rootPath');
 const storageSummaryEl = document.getElementById('storageSummary');
 const storageBarUsedEl = document.getElementById('storageBarUsed');
@@ -77,7 +86,7 @@ function formatPercent(value) {
 }
 
 async function apiGet(url) {
-  const response = await fetch(appUrl(url));
+  const response = await fetch(nodeApiUrl(url));
   if (!response.ok) {
     const errorBody = await response.json().catch(() => ({}));
     throw new Error(errorBody.error || `Request failed: ${response.status}`);
@@ -86,7 +95,7 @@ async function apiGet(url) {
 }
 
 async function apiSend(url, method, body) {
-  const response = await fetch(appUrl(url), {
+  const response = await fetch(nodeApiUrl(url), {
     method,
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -98,6 +107,63 @@ async function apiSend(url, method, body) {
   }
 
   return response.json().catch(() => ({}));
+}
+
+function setNodeStatus(message, status = '') {
+  nodeStatusEl.textContent = message;
+  nodeStatusEl.className = `node-status ${status}`.trim();
+}
+
+function renderNodeButtons() {
+  nodeButtonsEl.innerHTML = '';
+  for (const node of state.nodes) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'node-button';
+    button.classList.toggle('active', node.id === state.activeNodeId);
+    button.textContent = node.name;
+    button.addEventListener('click', () => void selectNode(node.id));
+    nodeButtonsEl.appendChild(button);
+  }
+}
+
+async function loadNodes() {
+  const response = await fetch(appUrl('/api/nodes'));
+  if (response.status === 404) return false;
+  if (!response.ok) {
+    const errorBody = await response.json().catch(() => ({}));
+    throw new Error(errorBody.error || `Unable to load nodes: ${response.status}`);
+  }
+  const data = await response.json();
+  state.nodes = Array.isArray(data.nodes) ? data.nodes : [];
+  if (state.nodes.length === 0) throw new Error('The hub has no configured nodes.');
+  nodesCardEl.hidden = false;
+  return true;
+}
+
+async function selectNode(nodeId) {
+  const node = state.nodes.find((candidate) => candidate.id === nodeId);
+  if (!node) return;
+
+  state.activeNodeId = node.id;
+  state.history = [];
+  state.historyIndex = -1;
+  state.sizeCache.clear();
+  state.clipboardPaths = [];
+  state.entries = [];
+  clearSelection();
+  renderNodeButtons();
+  setNodeStatus(`Connecting to ${node.name}...`, 'connecting');
+
+  try {
+    await loadConfig();
+    await loadStorage();
+    await loadDirectory(state.currentPath);
+    setNodeStatus(`${node.name} online`, 'online');
+  } catch (error) {
+    setNodeStatus(`${node.name} unavailable`, 'offline');
+    showToast(error.message);
+  }
 }
 
 async function loadConfig() {
@@ -319,7 +385,9 @@ function openEntry(entry) {
     return;
   }
 
-  window.location.href = appUrl(`/viewer.html?path=${encodeURIComponent(entry.path)}`);
+  const query = new URLSearchParams({ path: entry.path });
+  if (state.activeNodeId) query.set('node', state.activeNodeId);
+  window.location.href = appUrl(`/viewer.html?${query.toString()}`);
 }
 
 async function animateAndOpenEntry(entry, row) {
@@ -485,7 +553,7 @@ async function downloadSelected() {
   if (selected.length === 0) return;
 
   try {
-    const response = await fetch(appUrl('/api/bulk-download'), {
+    const response = await fetch(nodeApiUrl('/api/bulk-download'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ paths: selected }),
@@ -578,7 +646,7 @@ async function uploadFiles(fileList) {
   }
 
   try {
-    const response = await fetch(appUrl(`/api/upload?path=${encodeURIComponent(state.currentPath)}`), {
+    const response = await fetch(nodeApiUrl(`/api/upload?path=${encodeURIComponent(state.currentPath)}`), {
       method: 'POST',
       body: formData,
     });
@@ -798,6 +866,11 @@ topDeleteButtonEl.addEventListener('click', async () => {
 
 (async function initialize() {
   try {
+    const distributed = await loadNodes();
+    if (distributed) {
+      await selectNode(state.nodes[0].id);
+      return;
+    }
     await loadConfig();
     await loadStorage();
     await loadDirectory(state.currentPath);
