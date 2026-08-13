@@ -93,10 +93,26 @@
             <table>
               <thead>
                 <tr>
-                  <th>Name</th>
-                  <th>Type</th>
-                  <th>Size</th>
-                  <th>Modified</th>
+                  <th data-sort-key="name" aria-sort="ascending">
+                    <button class="sort-button active" type="button" data-sort-key="name">
+                      <span>Name</span><span class="sort-indicator" aria-hidden="true">↑</span>
+                    </button>
+                  </th>
+                  <th data-sort-key="type" aria-sort="none">
+                    <button class="sort-button" type="button" data-sort-key="type">
+                      <span>Type</span><span class="sort-indicator" aria-hidden="true">↕</span>
+                    </button>
+                  </th>
+                  <th data-sort-key="size" aria-sort="none">
+                    <button class="sort-button" type="button" data-sort-key="size">
+                      <span>Size</span><span class="sort-indicator" aria-hidden="true">↕</span>
+                    </button>
+                  </th>
+                  <th data-sort-key="modifiedAt" aria-sort="none">
+                    <button class="sort-button" type="button" data-sort-key="modifiedAt">
+                      <span>Modified</span><span class="sort-indicator" aria-hidden="true">↕</span>
+                    </button>
+                  </th>
                 </tr>
               </thead>
               <tbody id="entriesTableBody"></tbody>
@@ -117,6 +133,7 @@
 
     <input id="uploadInput" type="file" multiple hidden />
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script src="sort.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

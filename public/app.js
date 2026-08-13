@@ -5,6 +5,8 @@ const state = {
   currentPath: '/srv',
   sizeCache: new Map(),
   searchQuery: '',
+  sortKey: 'name',
+  sortDirection: 'asc',
   selectedPaths: new Set(),
   entries: [],
   visibleEntries: [],
@@ -36,6 +38,7 @@ const storageMetaEl = document.getElementById('storageMeta');
 const storageDevicesListEl = document.getElementById('storageDevicesList');
 const filesystemsListEl = document.getElementById('filesystemsList');
 const entriesTableBodyEl = document.getElementById('entriesTableBody');
+const sortButtons = [...document.querySelectorAll('.sort-button')];
 const breadcrumbsEl = document.getElementById('breadcrumbs');
 const searchInputEl = document.getElementById('searchInput');
 const toastEl = document.getElementById('toast');
@@ -501,6 +504,7 @@ async function revealSize(entry, sizeCell) {
   try {
     const dirSize = await getEntrySize(entry.path);
     sizeCell.textContent = formatBytes(dirSize);
+    if (state.sortKey === 'size') renderCurrentView();
   } catch (error) {
     sizeCell.textContent = 'Unavailable';
     showToast(error.message);
@@ -597,7 +601,39 @@ function renderEntries(entries) {
 }
 
 function renderCurrentView() {
-  renderEntries(getFilteredEntries());
+  renderEntries(FileManagerSort.sortEntries(
+    getFilteredEntries(),
+    state.sortKey,
+    state.sortDirection,
+    state.sizeCache
+  ));
+  updateSortHeaders();
+}
+
+function updateSortHeaders() {
+  for (const button of sortButtons) {
+    const key = button.dataset.sortKey;
+    const active = key === state.sortKey;
+    const header = button.closest('th');
+    button.classList.toggle('active', active);
+    button.querySelector('.sort-indicator').textContent = active
+      ? state.sortDirection === 'asc' ? '↑' : '↓'
+      : '↕';
+    header.setAttribute('aria-sort', active
+      ? state.sortDirection === 'asc' ? 'ascending' : 'descending'
+      : 'none');
+  }
+}
+
+function setSort(sortKey) {
+  if (state.sortKey === sortKey) {
+    state.sortDirection = state.sortDirection === 'asc' ? 'desc' : 'asc';
+  } else {
+    state.sortKey = sortKey;
+    state.sortDirection = 'asc';
+  }
+  clearSelection();
+  renderCurrentView();
 }
 
 function renderBreadcrumb(pathValue) {
@@ -858,6 +894,10 @@ searchInputEl.addEventListener('input', () => {
   clearSelection();
   renderCurrentView();
 });
+
+for (const button of sortButtons) {
+  button.addEventListener('click', () => setSort(button.dataset.sortKey));
+}
 
 searchInputEl.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
